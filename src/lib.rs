@@ -99,16 +99,13 @@ pub trait Notifiable {
     fn with_notify(&mut self, mut mutator: impl FnMut(&mut Self, &mut EventStore)) {
         let mut events = self.take_storage();
         mutator(self, &mut events);
-        self.notify_all(&mut events);
-        self.set_storage(events);
-    }
 
-    /// Notifies this structure for each element stored in the [EventStore].
-    fn notify_all(&mut self, events: &mut EventStore) {
         while !events.store.is_empty() {
             let event = events.store.pop_front().unwrap();
-            self.notify(&*event, events);
+            self.notify(&*event, &mut events);
         }
+
+        self.set_storage(events);
     }
 }
 
