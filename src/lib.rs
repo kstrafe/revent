@@ -20,21 +20,22 @@
 //! # Example of basic usage #
 //!
 //! ```
-//! use revent::{Event, EventStore, Notifiable};
+//! use revent::{down, Event, EventStore, Notifiable};
 //! use std::any::TypeId;
-//!
-//! struct MyEvent;
-//!
-//! impl Event for MyEvent { }
 //!
 //! struct MyNotifiable;
 //!
 //! impl Notifiable for MyNotifiable {
 //!     fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
-//!         println!("I was notified!");
-//!         if event.type_id() == TypeId::of::<MyEvent>() {
-//!             println!("This was MyEvent!");
+//!         println!("I am notified");
+//!         if event.type_id() == TypeId::of::<u32>() {
+//!             println!("This is a u32");
 //!             // Do something useful...
+//!         }
+//!
+//!         // Downcasting using the utility down function
+//!         if let Some(value) = down::<u32>(event) {
+//!             println!("Access to the u32 value: {}", value);
 //!         }
 //!     }
 //! }
@@ -42,12 +43,97 @@
 //! let mut mn = MyNotifiable { };
 //!
 //! mn.with_notify(|this, store| {
-//!     store.emit(MyEvent { });
+//!     store.emit(123u32);
 //! });
 //! ```
 //!
 //! The order in which events are processed is FIFO (first-in, first-out). Meaning that emitting an
 //! event guarantees that events emitted before will be run before.
+//!
+//! # More information #
+//!
+//! This library imagines a program or library using `revent` to be a nested structure of structs,
+//! many of which implement [Notifiable]. If a struct wishes to notify itself and its
+//! sub-structures, it should use `self.notify`. If it wishes to notify parents to the Nth degree
+//! it should [EventStore::emit] into an `EventStore`.
+//!
+//! ```
+//! // An example of direct self-notification
+//! use revent::{Event, EventStore, Notifiable};
+//! use std::any::TypeId;
+//!
+//! struct MyNotifiable;
+//!
+//! impl Notifiable for MyNotifiable {
+//!     fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+//!         println!("Notified");
+//!     }
+//! }
+//!
+//! impl MyNotifiable {
+//!     pub fn do_something(&mut self) {
+//!         self.with_notify(|this, store| {
+//!             // We need a store here because `notify` takes one, to which it itself can add
+//!             // events.
+//!             this.notify(&0u32, store);
+//!         });
+//!     }
+//! }
+//!
+//! let mut mn = MyNotifiable { };
+//!
+//! mn.do_something();
+//! ```
+//!
+//! The following shows how substructures can emit events to super-structures without themselves
+//! being [Notifiable].
+//!
+//! ```
+//! // An example of emitting notifications to some super-structure.
+//! use revent::{Event, EventStore, Notifiable};
+//! use std::any::TypeId;
+//!
+//! struct MyNotifiable {
+//!     substructure: Substructure,
+//! }
+//!
+//! impl Notifiable for MyNotifiable {
+//!     fn notify(&mut self, event: &dyn Event, store: &mut EventStore) {
+//!         println!("Notified");
+//!     }
+//! }
+//!
+//! impl MyNotifiable {
+//!     pub fn do_something(&mut self) {
+//!         self.with_notify(|this, store| {
+//!             this.substructure.do_substructure_thing(store);
+//!         });
+//!     }
+//! }
+//!
+//!
+//! struct Substructure;
+//!
+//! impl Substructure {
+//!     pub fn do_substructure_thing(&mut self, store: &mut EventStore) {
+//!         store.emit(0u32);
+//!     }
+//! }
+//!
+//! let mut mn = MyNotifiable {
+//!     substructure: Substructure { },
+//! };
+//!
+//! mn.do_something();
+//! ```
+//!
+//! # Downsides #
+//!
+//! Emitting events into the `EventStore` does not immediately execute an event. This is
+//! unfortunately the way it is due to Rusts aliasing rules: We simply cannot hold a
+//! super-structure while also mutably borring a field of that struct. We thus must accumulate
+//! events into a buffer (`EventStore`) and execute this store when control returns to the
+//! super-structure.
 #![deny(
     missing_docs,
     trivial_casts,
@@ -58,8 +144,22 @@
 )]
 use std::{any::Any, collections::VecDeque};
 
-/// A generic event.
-pub trait Event: Any {}
+/// A generic event. Implemented for all types.
+pub trait Event: Any {
+    /// Get the reference to this events [Any].
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T: Any> Event for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Shorthand version for downcasting an [Event].
+pub fn down<T: 'static>(event: &dyn Event) -> Option<&T> {
+    Any::downcast_ref::<T>(event.as_any())
+}
 
 /// Event storage. Events are [EventStore::emit]ted into this structure.
 #[derive(Default)]
@@ -115,8 +215,6 @@ mod tests {
     use std::any::TypeId;
 
     struct EmptyEvent;
-
-    impl Event for EmptyEvent {}
 
     #[test]
     fn self_notification() {
@@ -203,8 +301,6 @@ mod tests {
     fn recursive_events() {
         struct ReactiveEvent;
 
-        impl Event for ReactiveEvent {}
-
         struct Example {
             seen_reactive_event: bool,
         }
@@ -265,5 +361,39 @@ mod tests {
         });
 
         assert_eq!(3, example.seen_events);
+    }
+
+    #[test]
+    fn downcasting_event() {
+        struct NumberEvent {
+            value: u8,
+        }
+
+        struct Example {
+            number: u8,
+        }
+
+        impl Notifiable for Example {
+            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+                if let Some(NumberEvent { value }) = down(event) {
+                    self.number = *value;
+                }
+            }
+        }
+
+        // ---
+
+        let mut example = Example { number: 0 };
+
+        assert_eq!(0, example.number);
+
+        example.with_notify(|_, store| {
+            store.emit(EmptyEvent {});
+            store.emit(NumberEvent { value: 13 });
+            store.emit(EmptyEvent {});
+            store.emit(NumberEvent { value: 123 });
+        });
+
+        assert_eq!(123, example.number);
     }
 }
