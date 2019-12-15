@@ -3,12 +3,7 @@ use revent::*;
 use std::any::TypeId;
 
 struct EmptyEvent;
-
-impl Event for EmptyEvent {}
-
 struct PanicEvent;
-
-impl Event for PanicEvent {}
 
 // ---
 
