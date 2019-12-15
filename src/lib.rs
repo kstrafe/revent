@@ -234,4 +234,36 @@ mod tests {
 
         assert!(example.seen_reactive_event);
     }
+
+    #[test]
+    fn multiple_events() {
+        struct Example {
+            seen_events: u8,
+        }
+
+        impl Notifiable for Example {
+            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+                if event.type_id() == TypeId::of::<EmptyEvent>() {
+                    self.seen_events += 1;
+                }
+            }
+        }
+
+        // ---
+
+        let mut example = Example { seen_events: 0 };
+
+        assert_eq!(0, example.seen_events);
+
+        example.with_notify(|this, store| {
+            store.emit(EmptyEvent {});
+            assert_eq!(0, this.seen_events);
+            store.emit(EmptyEvent {});
+            assert_eq!(0, this.seen_events);
+            store.emit(EmptyEvent {});
+            assert_eq!(0, this.seen_events);
+        });
+
+        assert_eq!(3, example.seen_events);
+    }
 }
