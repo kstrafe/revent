@@ -20,120 +20,128 @@
 //! # Example of basic usage #
 //!
 //! ```
-//! use revent::{down, Event, EventStore, Notifiable};
-//! use std::any::TypeId;
+//! use revent::{Event, Notifiable};
 //!
-//! struct MyNotifiable;
+//! struct X;
 //!
-//! impl Notifiable for MyNotifiable {
-//!     fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
-//!         println!("I am notified");
-//!         if event.type_id() == TypeId::of::<u32>() {
-//!             println!("This is a u32");
-//!             // Do something useful...
+//! impl Notifiable for X {
+//!     fn event(&mut self, _event: &dyn Event, _system: &mut dyn Notifiable) {
+//!         println!("An event has been received!");
+//!         // From here, call `event` on all direct children in X
+//!     }
+//! }
+//!
+//! let mut x = X;
+//!
+//! let system = &mut ();
+//!
+//! x.notify(&"This is an event, almost anything can be an event".to_string(), system);
+//! ```
+//!
+//! # Nested structures #
+//!
+//! When dealing with nested structures, we want to our notifications to be sent to every
+//! [Notifiable] object. Because of Rust's mutable aliasing restriction this is not as
+//! straighforward as just putting the object in a list.
+//!
+//! Instead what we do is we move a notifier out of the structure tree and consider the rest of the
+//! tree as one single [Notifier]. This way, the structure that was split out can call
+//! `self.notify` with the rest of the tree as the system - causing all notifiables to be updated.
+//!
+//! ```
+//! use revent::{down, Event, Notifiable, Notifier};
+//!
+//! // We make 3 classes as exemplified by the video player introduction above
+//!
+//! struct Client {
+//!     gui: Notifier<Gui>,
+//!     video: Notifier<Video>,
+//! }
+//! // Contains data we use to draw visual elements to the screen
+//! struct Gui {
+//!     pub running_time: u32,
+//! }
+//! struct Video; // Contains the video loader, decoder, and so on
+//!
+//! // Make all these notifiable
+//!
+//! // Note that `system` means "the rest of the structures", so it excludes self.
+//!
+//! impl Notifiable for Client {
+//!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+//!         println!("Client got an event");
+//!         self.gui.event(event, system);
+//!         self.video.event(event, system);
+//!     }
+//! }
+//!
+//! impl Notifiable for Gui {
+//!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+//!         println!("Gui got an event");
+//!         if let Some(VideoChanged { new_time }) = down(event) {
+//!             self.running_time = *new_time;
 //!         }
-//!
-//!         // Downcasting using the utility down function
-//!         if let Some(value) = down::<u32>(event) {
-//!             println!("Access to the u32 value: {}", value);
-//!         }
 //!     }
 //! }
 //!
-//! let mut mn = MyNotifiable { };
+//! impl Notifiable for Video {
+//!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+//!         println!("Video got an event");
+//!     }
+//! }
 //!
-//! mn.with_notify(|this, store| {
-//!     store.emit(123u32);
-//! });
+//! // Add some functions that do work
+//!
+//! impl Client {
+//!     fn client_work(&mut self, system: &mut dyn Notifiable) {
+//!         // Let's load a new video, as per the introductory paragraph
+//!         Notifier::split(
+//!             self,
+//!             |x| &mut x.video,
+//!             |system, video| {
+//!                 video.video_work(system);
+//!             },
+//!         );
+//!     }
+//! }
+//!
+//! impl Gui {
+//!     fn gui_work(&mut self, system: &mut dyn Notifiable) {
+//!     }
+//! }
+//!
+//! impl Video {
+//!     fn video_work(&mut self, system: &mut dyn Notifiable) {
+//!         // Do some loading work...
+//!         let new_time = 123;
+//!         self.notify(&VideoChanged { new_time }, system);
+//!     }
+//! }
+//!
+//! // A message that Video can send
+//! #[derive(Clone)]
+//! struct VideoChanged {
+//!     pub new_time: u32,
+//! }
+//!
+//! // Create a client
+//! let mut client = Client { gui: Notifier::new(Gui { running_time: 0 }), video: Notifier::new(Video) };
+//!
+//! // By making the root system `&mut ()` we're essentially saying that the events stop here, we
+//! // have nowhere to send them to in this context (in `fn main`).
+//! let mut root_system = &mut ();
+//!
+//! // Let's make sure the Gui's running time starts at 0
+//! assert_eq!(client.gui.running_time, 0);
+//!
+//! // To simulate the introductory paragraph, let's load a new video
+//! client.client_work(root_system);
+//!
+//! // Because we loaded a new video, the Gui's event handler should have updated its own state
+//! // accordingly
+//!
+//! assert_eq!(client.gui.running_time, 123);
 //! ```
-//!
-//! The order in which events are processed is FIFO (first-in, first-out). Meaning that emitting an
-//! event guarantees that events emitted before will be run before.
-//!
-//! # More information #
-//!
-//! This library imagines a program or library using `revent` to be a nested structure of structs,
-//! many of which implement [Notifiable]. If a struct wishes to notify itself and its
-//! sub-structures, it should use `self.notify`. If it wishes to notify parents to the Nth degree
-//! it should [EventStore::emit] into an `EventStore`.
-//!
-//! ```
-//! // An example of direct self-notification
-//! use revent::{Event, EventStore, Notifiable};
-//! use std::any::TypeId;
-//!
-//! struct MyNotifiable;
-//!
-//! impl Notifiable for MyNotifiable {
-//!     fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
-//!         println!("Notified");
-//!     }
-//! }
-//!
-//! impl MyNotifiable {
-//!     pub fn do_something(&mut self) {
-//!         self.with_notify(|this, store| {
-//!             // We need a store here because `notify` takes one, to which it itself can add
-//!             // events.
-//!             this.notify(&0u32, store);
-//!         });
-//!     }
-//! }
-//!
-//! let mut mn = MyNotifiable { };
-//!
-//! mn.do_something();
-//! ```
-//!
-//! The following shows how substructures can emit events to super-structures without themselves
-//! being [Notifiable].
-//!
-//! ```
-//! // An example of emitting notifications to some super-structure.
-//! use revent::{Event, EventStore, Notifiable};
-//! use std::any::TypeId;
-//!
-//! struct MyNotifiable {
-//!     substructure: Substructure,
-//! }
-//!
-//! impl Notifiable for MyNotifiable {
-//!     fn notify(&mut self, event: &dyn Event, store: &mut EventStore) {
-//!         println!("Notified");
-//!     }
-//! }
-//!
-//! impl MyNotifiable {
-//!     pub fn do_something(&mut self) {
-//!         self.with_notify(|this, store| {
-//!             this.substructure.do_substructure_thing(store);
-//!         });
-//!     }
-//! }
-//!
-//!
-//! struct Substructure;
-//!
-//! impl Substructure {
-//!     pub fn do_substructure_thing(&mut self, store: &mut EventStore) {
-//!         store.emit(0u32);
-//!     }
-//! }
-//!
-//! let mut mn = MyNotifiable {
-//!     substructure: Substructure { },
-//! };
-//!
-//! mn.do_something();
-//! ```
-//!
-//! # Downsides #
-//!
-//! Emitting events into the `EventStore` does not immediately execute an event. This is
-//! unfortunately the way it is due to Rusts aliasing rules: We simply cannot hold a
-//! super-structure while also mutably borring a field of that struct. We thus must accumulate
-//! events into a buffer (`EventStore`) and execute this store when control returns to the
-//! super-structure.
 #![deny(
     missing_docs,
     trivial_casts,
@@ -142,17 +150,52 @@
     unused_import_braces,
     unused_qualifications
 )]
-use std::{any::Any, collections::VecDeque};
+use std::{
+    any::Any,
+    collections::VecDeque,
+    ops::{Deref, DerefMut},
+};
 
 /// A generic event. Implemented for all types.
-pub trait Event: Any {
+pub trait Event: Any + 'static {
     /// Get the reference to this events [Any].
     fn as_any(&self) -> &dyn Any;
+    /// da
+    fn as_box(&self) -> Box<dyn Event + 'static>;
 }
 
-impl<T: Any> Event for T {
+impl<T: Any + Clone> Event for T {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn as_box(&self) -> Box<dyn Event + 'static> {
+        Box::new(self.clone())
+    }
+}
+
+struct EventStore {
+    store: VecDeque<Box<dyn Event>>,
+}
+
+impl EventStore {
+    fn new() -> Self {
+        Self {
+            store: VecDeque::new(),
+        }
+    }
+
+    fn pop(&mut self) -> Option<Box<dyn Event>> {
+        self.store.pop_front()
+    }
+}
+
+impl Notifiable for EventStore {
+    fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
+        self.store.push_back(event.as_box());
+    }
+
+    fn notify(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
+        panic!("The event store cannot be notified");
     }
 }
 
@@ -161,51 +204,82 @@ pub fn down<T: 'static>(event: &dyn Event) -> Option<&T> {
     Any::downcast_ref::<T>(event.as_any())
 }
 
-/// Event storage. Events are [EventStore::emit]ted into this structure.
-#[derive(Default)]
-pub struct EventStore {
-    pub(crate) store: VecDeque<Box<dyn Event>>,
-}
-
-impl EventStore {
-    /// Add an event to the event storage.
-    pub fn emit<T: 'static + Event>(&mut self, event: T) {
-        self.store.push_back(Box::new(event));
-    }
-}
-
 /// Main trait of this crate to implement on structures.
 pub trait Notifiable {
-    /// Notify this structure of an event. It should call [Notifiable::notify] on all subclasses that are
-    /// [Notifiable].
-    fn notify(&mut self, event: &dyn Event, store: &mut EventStore);
-
-    /// Takes event storage from this struct. Used for optimizing away the creation and destruction
-    /// of the event store. By doing so, we can reuse the same event store for all events.
+    /// Handle the event for this structure. Call [Notifiable::notify] instead of this.
     ///
-    /// The default implementation creates a new event store. If you want to speed up your program
-    /// then you need to take the event store from the struct (via [Option::take]). Note that you
-    /// must then also use [Notifiable::set_storage] to put the store back after it has been used.
-    fn take_storage(&mut self) -> EventStore {
-        EventStore::default()
+    /// What you should do: In this method delegate the event down to all fields that are
+    /// [Notifiable] and perform any internal changes to the structure to reflect the event.
+    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable);
+
+    /// Notify this structure and the system about an event.
+    ///
+    /// Calls [Notifiable::event] on both the current object and the system.
+    fn notify(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+        let mut store = EventStore::new();
+        system.event(event, &mut store);
+        self.event(event, &mut store);
+
+        while let Some(event) = store.pop() {
+            system.event(&*event, &mut store);
+            self.event(&*event, &mut store);
+        }
+    }
+}
+
+impl Notifiable for () {
+    fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {}
+}
+
+/// Wrapper structure for notifiers.
+///
+/// When a structure sends a notification, it must be split out from the tree structure it
+/// originates from. The reason for this is twofold:
+///
+/// 1. To avoid double-self notification.
+pub struct Notifier<T: Notifiable>(Option<T>);
+
+impl<T: Notifiable> Notifier<T> {
+    /// Create a new [Notifier].
+    pub fn new(datum: T) -> Self {
+        Self(Some(datum))
     }
 
-    /// Return the event store to its place in this struct. See [Notifiable::take_storage] for more
-    /// information.
-    fn set_storage(&mut self, _: EventStore) {}
+    /// Access a notifier inside a structure and supply the parent structure as the system.
+    pub fn split<O: Notifiable>(
+        datum: &mut O,
+        mut accessor: impl FnMut(&mut O) -> &mut Notifier<T>,
+        mut mutator: impl FnMut(&mut dyn Notifiable, &mut T),
+    ) {
+        let access = accessor(datum);
+        let mut notifier = access.0.take().unwrap();
 
-    /// Runs code with a given event store and executes all the events at the end of the
-    /// scope.
-    fn with_notify(&mut self, mut mutator: impl FnMut(&mut Self, &mut EventStore)) {
-        let mut events = self.take_storage();
-        mutator(self, &mut events);
+        mutator(datum, &mut notifier);
 
-        while !events.store.is_empty() {
-            let event = events.store.pop_front().unwrap();
-            self.notify(&*event, &mut events);
+        let access = accessor(datum);
+        access.0 = Some(notifier);
+    }
+}
+
+impl<T: Notifiable> Deref for Notifier<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().unwrap()
+    }
+}
+
+impl<T: Notifiable> DerefMut for Notifier<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut().unwrap()
+    }
+}
+
+impl<T: Notifiable> Notifiable for Notifier<T> {
+    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+        if let Some(ref mut item) = self.0 {
+            item.event(event, system);
         }
-
-        self.set_storage(events);
     }
 }
 
@@ -214,6 +288,7 @@ mod tests {
     use crate::*;
     use std::any::TypeId;
 
+    #[derive(Clone)]
     struct EmptyEvent;
 
     #[test]
@@ -223,7 +298,7 @@ mod tests {
         }
 
         impl Notifiable for Example {
-            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
                 if event.type_id() == TypeId::of::<EmptyEvent>() {
                     self.seen_event = true;
                 }
@@ -236,9 +311,7 @@ mod tests {
 
         assert!(!example.seen_event);
 
-        example.with_notify(|_, store| {
-            store.emit(EmptyEvent {});
-        });
+        example.notify(&EmptyEvent, &mut ());
 
         assert!(example.seen_event);
     }
@@ -250,7 +323,7 @@ mod tests {
         }
 
         impl Notifiable for Substructure {
-            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
                 if event.type_id() == TypeId::of::<EmptyEvent>() {
                     self.seen_event = true;
                 }
@@ -258,8 +331,8 @@ mod tests {
         }
 
         impl Substructure {
-            fn generate_event(&mut self, store: &mut EventStore) {
-                store.emit(EmptyEvent {});
+            fn generate_event(&mut self, system: &mut dyn Notifiable) {
+                self.notify(&EmptyEvent {}, system);
             }
         }
 
@@ -267,15 +340,15 @@ mod tests {
 
         struct Example {
             seen_event: bool,
-            substructure: Substructure,
+            substructure: Notifier<Substructure>,
         }
 
         impl Notifiable for Example {
-            fn notify(&mut self, event: &dyn Event, store: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
                 if event.type_id() == TypeId::of::<EmptyEvent>() {
                     self.seen_event = true;
                 }
-                self.substructure.notify(event, store);
+                self.substructure.event(event, system);
             }
         }
 
@@ -283,15 +356,19 @@ mod tests {
 
         let mut example = Example {
             seen_event: false,
-            substructure: Substructure { seen_event: false },
+            substructure: Notifier::new(Substructure { seen_event: false }),
         };
 
         assert!(!example.seen_event);
         assert!(!example.substructure.seen_event);
 
-        example.with_notify(|example, store| {
-            example.substructure.generate_event(store);
-        });
+        Notifier::split(
+            &mut example,
+            |x| &mut x.substructure,
+            |system, substructure| {
+                substructure.generate_event(system);
+            },
+        );
 
         assert!(example.seen_event);
         assert!(example.substructure.seen_event);
@@ -299,6 +376,7 @@ mod tests {
 
     #[test]
     fn recursive_events() {
+        #[derive(Clone)]
         struct ReactiveEvent;
 
         struct Example {
@@ -306,10 +384,10 @@ mod tests {
         }
 
         impl Notifiable for Example {
-            fn notify(&mut self, event: &dyn Event, store: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
                 if event.type_id() == TypeId::of::<EmptyEvent>() {
                     assert!(!self.seen_reactive_event);
-                    store.emit(ReactiveEvent {});
+                    self.notify(&ReactiveEvent {}, system);
                 } else if event.type_id() == TypeId::of::<ReactiveEvent>() {
                     self.seen_reactive_event = true;
                 }
@@ -324,9 +402,7 @@ mod tests {
 
         assert!(!example.seen_reactive_event);
 
-        example.with_notify(|_, store| {
-            store.emit(EmptyEvent {});
-        });
+        example.notify(&EmptyEvent {}, &mut ());
 
         assert!(example.seen_reactive_event);
     }
@@ -338,7 +414,7 @@ mod tests {
         }
 
         impl Notifiable for Example {
-            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
                 if event.type_id() == TypeId::of::<EmptyEvent>() {
                     self.seen_events += 1;
                 }
@@ -351,20 +427,19 @@ mod tests {
 
         assert_eq!(0, example.seen_events);
 
-        example.with_notify(|this, store| {
-            store.emit(EmptyEvent {});
-            assert_eq!(0, this.seen_events);
-            store.emit(EmptyEvent {});
-            assert_eq!(0, this.seen_events);
-            store.emit(EmptyEvent {});
-            assert_eq!(0, this.seen_events);
-        });
+        example.notify(&EmptyEvent {}, &mut ());
+        assert_eq!(1, example.seen_events);
 
+        example.notify(&EmptyEvent {}, &mut ());
+        assert_eq!(2, example.seen_events);
+
+        example.notify(&EmptyEvent {}, &mut ());
         assert_eq!(3, example.seen_events);
     }
 
     #[test]
     fn downcasting_event() {
+        #[derive(Clone)]
         struct NumberEvent {
             value: u8,
         }
@@ -374,7 +449,7 @@ mod tests {
         }
 
         impl Notifiable for Example {
-            fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
+            fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
                 if let Some(NumberEvent { value }) = down(event) {
                     self.number = *value;
                 }
@@ -387,12 +462,10 @@ mod tests {
 
         assert_eq!(0, example.number);
 
-        example.with_notify(|_, store| {
-            store.emit(EmptyEvent {});
-            store.emit(NumberEvent { value: 13 });
-            store.emit(EmptyEvent {});
-            store.emit(NumberEvent { value: 123 });
-        });
+        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&NumberEvent { value: 13 }, &mut ());
+        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&NumberEvent { value: 123 }, &mut ());
 
         assert_eq!(123, example.number);
     }
