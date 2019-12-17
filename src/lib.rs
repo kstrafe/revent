@@ -28,21 +28,39 @@
 //!     fn event(&mut self, _event: &dyn Event, _system: &mut dyn Notifiable) {
 //!         println!("An event has been received!");
 //!         // From here, call `event` on all direct children in X
+//!
+//!         // _event: Actual event we're being called with, can be downcasted to a concrete event
+//!         // or checked for a `type_id()`
+//!
+//!         // _system: Contains all event receivers excluding `self` and its children
 //!     }
 //! }
 //!
 //! let mut x = X;
 //!
-//! x.notify(&"This is an event, almost anything can be an event", &mut Ignore);
+//! // Notify invokes `fn event` of both `this` and the given system.
+//! x.notify(
+//!     &"This is an event, almost anything can be an event", // The event object itself, only
+//!     // needs to satisfy `Any` bounds.
+//!     &mut Ignore, // System to send the event to and to send self-generated events to.
+//!     // Since we can't hold both `x` and a struct containing `x` we need to feed in 2 variables:
+//!     // `&mut self`, and `&mut Ignore`. If `&mut self` calls `self.notify` from within its own
+//!     // event handler then it can use the provided system. This allows for recursive event
+//!     // calls.
+//!     // `Ignore` is a `Notifiable` that just ignores all events.
+//! );
 //! ```
+//!
+//! Usage like this is not typical. We'll soon see how we can use `revent` in big data structures
+//! with more complex relationships.
 //!
 //! # The [Notifiable] wrapper #
 //!
 //! This section is a preamble to the next section. It is here due to the next sections verbosity.
 //!
-//! To avoid `Rc<RefCell<_>>` or other dynamic allocation with borrow checking we use something
-//! called a [Notifier] to wrap our [Notifiable]s in. This ensures that a notifiable called from
-//! another notifiable is able to propagate the event up to its parent.
+//! To avoid `Rc<RefCell<_>>` and other dynamic allocation / borrow checking we use something
+//! called a [Notifier] to wrap our [Notifiable]s. This ensures that a notifiable called from its
+//! parent notifiable is able to propagate its events upwards.
 //!
 //! Upward propagation is implemented by splitting the `Notifiable` out of the struct and
 //! considering the parent struct as just another system while we operate on the split out struct
@@ -58,7 +76,7 @@
 //!
 //! impl Notifiable for X {
 //!     fn event(&mut self, event: &dyn Event, _system: &mut dyn Notifiable) {
-//!         println!("{:?} arrived in X", event.type_id());
+//!         println!("{:?} arrived in X", event.as_any());
 //!     }
 //! }
 //!
@@ -72,7 +90,7 @@
 //!
 //! let mut x = Notifier::new(X { y: Notifier::new(Y) });
 //!
-//! // The root system, it's empty because we have nowhere to send events to.
+//! // The root system, it's empty because we have nowhere to send events to
 //! let system = &mut Ignore;
 //!
 //! // This removes `y` from the tree temporarily so it can be accessed while it's being given a
@@ -82,13 +100,15 @@
 //!     |x| &mut x.y, // Path inside the variable to the notifier
 //!     system        // Previous system to add to the variable which we extract from
 //! );
-//! let (y, system) = guard.split(); // System contains both x and the previous system.
+//! let (y, system) = guard.split(); // System contains both x and the previous system
 //! y.notify(&"Hello world", system);
+//!
+//! drop(guard); // As the guard is dropped the split-out `y` is reinserted into the tree
 //! ```
 //!
 //! # Nested structures #
 //!
-//! When dealing with nested structures, we want to our notifications to be sent to every
+//! When dealing with nested structures, we want to send our notifications to every
 //! [Notifiable] object. Because of Rust's mutable aliasing restriction this is not as
 //! straighforward as just putting the object in a list.
 //!
@@ -105,15 +125,15 @@
 //!     gui: Notifier<Gui>,
 //!     video: Notifier<Video>,
 //! }
+//!
 //! // Contains data we use to draw visual elements to the screen
 //! struct Gui {
 //!     pub running_time: u32,
 //! }
+//!
 //! struct Video; // Contains the video loader, decoder, and so on
 //!
 //! // Make all these notifiable
-//!
-//! // Note that `system` means "the rest of the structures", so it excludes self.
 //!
 //! impl Notifiable for Client {
 //!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
@@ -170,8 +190,8 @@
 //! // Create a client
 //! let mut client = Client { gui: Notifier::new(Gui { running_time: 0 }), video: Notifier::new(Video) };
 //!
-//! // By making the root system `&mut ()` we're essentially saying that the events stop here, we
-//! // have nowhere to send them to in this context (in `fn main`).
+//! // By making the root system `Ignore` we're essentially saying that the events stop here, we
+//! // have nowhere to send them to in this context (in `fn main`)
 //! let root_system = &mut Ignore;
 //!
 //! // Let's make sure the Gui's running time starts at 0
@@ -195,10 +215,11 @@
 //! ```
 //!
 //! Meaning that the current struct will exhaust its own events first. After this has happened the
-//! system events will run.
+//! system events will run. One can play around with the following snippet (more details in the order
+//! example `cargo run --example order`) to see how this works.
 //!
 //! ```
-//! use revent::{down, Event, Notifiable, Notifier};
+//! use revent::{down, Event, Notifiable};
 //!
 //! struct Dummy(u32);
 //!
