@@ -1,92 +1,49 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use revent::*;
-use std::any::TypeId;
 
-struct EmptyEvent;
-struct PanicEvent;
+#[derive(Debug)]
+struct NumberEvent(pub i32);
 
 // ---
 
-struct Uncached {}
+struct Sink;
 
-impl Notifiable for Uncached {
-    fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
-        if event.type_id() == TypeId::of::<PanicEvent>() {
-            panic!();
+impl Notifiable for Sink {
+    fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
+        if let Some(NumberEvent(number)) = down(event) {
+            if *number == 0 {
+                panic!("Number cannot be zero");
+            }
         }
     }
 }
 
 // ---
 
-struct Cached {
-    store: Option<EventStore>,
-}
+struct Counter;
 
-impl Notifiable for Cached {
-    fn notify(&mut self, event: &dyn Event, _: &mut EventStore) {
-        if event.type_id() == TypeId::of::<PanicEvent>() {
-            panic!();
+impl Notifiable for Counter {
+    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+        if let Some(NumberEvent(number)) = down(event) {
+            if *number != 0 {
+                self.notify(&NumberEvent(number - 1), system);
+            }
         }
     }
-
-    fn take_storage(&mut self) -> EventStore {
-        self.store.take().unwrap()
-    }
-
-    fn set_storage(&mut self, store: EventStore) {
-        self.store = Some(store);
-    }
 }
-
-// ---
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("default eventstore settings", |b| {
-        let mut uncached = Uncached {};
-
+    c.bench_function("one way event", |b| {
+        let mut sink = Sink;
         b.iter(|| {
-            uncached.with_notify(|_, store| {
-                store.emit(black_box(EmptyEvent {}));
-            });
+            sink.notify(&black_box(NumberEvent(1)), &mut ());
         });
     });
 
-    c.bench_function("cached eventstore", |b| {
-        let mut cached = Cached {
-            store: Some(EventStore::default()),
-        };
-
+    c.bench_function("counter", |b| {
+        let mut counter = Counter;
         b.iter(|| {
-            cached.with_notify(|_, store| {
-                store.emit(black_box(EmptyEvent {}));
-            });
-        });
-    });
-
-    c.bench_function("default eventstore settings 1000 events", |b| {
-        let mut uncached = Uncached {};
-
-        b.iter(|| {
-            uncached.with_notify(|_, store| {
-                for _ in 0..1000 {
-                    store.emit(black_box(EmptyEvent {}));
-                }
-            });
-        });
-    });
-
-    c.bench_function("cached eventstore 1000 events", |b| {
-        let mut cached = Cached {
-            store: Some(EventStore::default()),
-        };
-
-        b.iter(|| {
-            cached.with_notify(|_, store| {
-                for _ in 0..1000 {
-                    store.emit(black_box(EmptyEvent {}));
-                }
-            });
+            counter.notify(&black_box(NumberEvent(1000)), &mut ());
         });
     });
 }

@@ -35,7 +35,58 @@
 //!
 //! let system = &mut ();
 //!
-//! x.notify(&"This is an event, almost anything can be an event".to_string(), system);
+//! x.notify(&"This is an event, almost anything can be an event", system);
+//! ```
+//!
+//! # The [Notifiable] wrapper #
+//!
+//! This section is a preamble to the next section. It is here due to the next sections verbosity.
+//!
+//! To avoid `Rc<RefCell<_>>` or other dynamic allocation with borrow checking we use something
+//! called a [Notifier] to wrap our [Notifiable]s in. This ensures that a notifiable called from
+//! another notifiable is able to propagate the event up to its parent.
+//!
+//! Upward propagation is implemented by splitting the `Notifiable` out of the struct and
+//! considering the parent struct as just another system while we operate on the split out struct
+//! directly.
+//!
+//! ```
+//! use revent::{Event, Notifiable, Notifier};
+//!
+//! struct X {
+//!     y: Notifier<Y>,
+//! }
+//! struct Y;
+//!
+//! impl Notifiable for X {
+//!     fn event(&mut self, event: &dyn Event, _system: &mut dyn Notifiable) {
+//!         println!("{:?} arrived in X", event);
+//!     }
+//! }
+//!
+//! impl Notifiable for Y {
+//!     fn event(&mut self, event: &dyn Event, _system: &mut dyn Notifiable) {
+//!         println!("{:?} arrived in Y", event.as_any());
+//!     }
+//! }
+//!
+//! // ---
+//!
+//! let mut x = Notifier::new(X { y: Notifier::new(Y) });
+//!
+//! // The root system, it's empty because we have nowhere to send events to.
+//! let system = &mut ();
+//!
+//! // This removes `y` from the tree temporarily so it can be accessed while it's being given a
+//! // system that contains `x`, thus allowing `y` to send events to `x`.
+//! Notifier::split(
+//!     &mut x, // Which variable to "split"
+//!     system, // Root system (empty)
+//!     |x| &mut x.y, // Accessor for our `Notifier<_>` to split off
+//!     |system, y| { // closure to run on `Y`
+//!         y.notify(&"Hello world", system);
+//!     }
+//! );
 //! ```
 //!
 //! # Nested structures #
@@ -97,7 +148,8 @@
 //!         // Let's load a new video, as per the introductory paragraph
 //!         Notifier::split(
 //!             self,
-//!             |x| &mut x.video,
+//!             system, // The system to add to self
+//!             |x| &mut x.video, // The value to operate on
 //!             |system, video| {
 //!                 video.video_work(system);
 //!             },
@@ -119,7 +171,7 @@
 //! }
 //!
 //! // A message that Video can send
-//! #[derive(Clone)]
+//! #[derive(Debug)]
 //! struct VideoChanged {
 //!     pub new_time: u32,
 //! }
@@ -129,7 +181,7 @@
 //!
 //! // By making the root system `&mut ()` we're essentially saying that the events stop here, we
 //! // have nowhere to send them to in this context (in `fn main`).
-//! let mut root_system = &mut ();
+//! let root_system = &mut ();
 //!
 //! // Let's make sure the Gui's running time starts at 0
 //! assert_eq!(client.gui.running_time, 0);
@@ -142,6 +194,38 @@
 //!
 //! assert_eq!(client.gui.running_time, 123);
 //! ```
+//!
+//! # Run order of recursive events #
+//!
+//! When you call [Notifiable::notify], the following happens:
+//! ```ignore
+//! self.event(event, system);
+//! system.event(event, self)
+//! ```
+//!
+//! Meaning that the current struct will exhaust its own events first. After this has happend the
+//! system events will run.
+//!
+//! ```
+//! use revent::{down, Event, Notifiable, Notifier};
+//!
+//! #[derive(Debug)]
+//! struct Dummy(u32);
+//!
+//! impl Notifiable for Dummy {
+//!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+//!         println!("{:?}: {:?}", self, event);
+//!         if let Some(number) = down::<i32>(event) {
+//!             self.notify(&"Response event", system);
+//!         }
+//!     }
+//! }
+//!
+//! let mut this = Dummy(0);
+//! let mut system = Dummy(1);
+//!
+//! this.notify(&0i32, &mut system);
+//! ```
 #![deny(
     missing_docs,
     trivial_casts,
@@ -152,57 +236,34 @@
 )]
 use std::{
     any::Any,
-    collections::VecDeque,
+    fmt::Debug,
     ops::{Deref, DerefMut},
 };
 
+// ---
+
 /// A generic event. Implemented for all types.
-pub trait Event: Any + 'static {
-    /// Get the reference to this events [Any].
+pub trait Event: Any + Debug {
+    /// Get the reference to this events' [Any]. Used for downcasting.
+    ///
+    /// Normally not used directly but rather used by [down].
     fn as_any(&self) -> &dyn Any;
-    /// da
-    fn as_box(&self) -> Box<dyn Event + 'static>;
 }
 
-impl<T: Any + Clone> Event for T {
+impl<T: Any + Debug> Event for T {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    fn as_box(&self) -> Box<dyn Event + 'static> {
-        Box::new(self.clone())
-    }
 }
 
-struct EventStore {
-    store: VecDeque<Box<dyn Event>>,
-}
-
-impl EventStore {
-    fn new() -> Self {
-        Self {
-            store: VecDeque::new(),
-        }
-    }
-
-    fn pop(&mut self) -> Option<Box<dyn Event>> {
-        self.store.pop_front()
-    }
-}
-
-impl Notifiable for EventStore {
-    fn event(&mut self, event: &dyn Event, _: &mut dyn Notifiable) {
-        self.store.push_back(event.as_box());
-    }
-
-    fn notify(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
-        panic!("The event store cannot be notified");
-    }
-}
+// ---
 
 /// Shorthand version for downcasting an [Event].
 pub fn down<T: 'static>(event: &dyn Event) -> Option<&T> {
     Any::downcast_ref::<T>(event.as_any())
 }
+
+// ---
 
 /// Main trait of this crate to implement on structures.
 pub trait Notifiable {
@@ -215,21 +276,34 @@ pub trait Notifiable {
     /// Notify this structure and the system about an event.
     ///
     /// Calls [Notifiable::event] on both the current object and the system.
-    fn notify(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-        let mut store = EventStore::new();
-        system.event(event, &mut store);
-        self.event(event, &mut store);
-
-        while let Some(event) = store.pop() {
-            system.event(&*event, &mut store);
-            self.event(&*event, &mut store);
-        }
+    fn notify(&mut self, event: &dyn Event, system: &mut dyn Notifiable)
+    where
+        Self: Sized,
+    {
+        self.event(event, system);
+        let this: &mut dyn Notifiable = self;
+        system.event(event, this);
     }
 }
 
 impl Notifiable for () {
     fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {}
 }
+
+struct BinarySystem<'a, 'b>((&'a mut dyn Notifiable, &'b mut dyn Notifiable));
+
+impl<'a, 'b> Notifiable for BinarySystem<'a, 'b> {
+    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+        (self.0)
+            .0
+            .event(event, &mut BinarySystem((system, (self.0).1)));
+        (self.0)
+            .1
+            .event(event, &mut BinarySystem((system, (self.0).0)));
+    }
+}
+
+// ---
 
 /// Wrapper structure for notifiers.
 ///
@@ -248,13 +322,16 @@ impl<T: Notifiable> Notifier<T> {
     /// Access a notifier inside a structure and supply the parent structure as the system.
     pub fn split<O: Notifiable>(
         datum: &mut O,
+        system: &mut dyn Notifiable,
         mut accessor: impl FnMut(&mut O) -> &mut Notifier<T>,
         mut mutator: impl FnMut(&mut dyn Notifiable, &mut T),
     ) {
         let access = accessor(datum);
         let mut notifier = access.0.take().unwrap();
 
-        mutator(datum, &mut notifier);
+        let mut nwa = BinarySystem((datum, system));
+
+        mutator(&mut nwa, &mut notifier);
 
         let access = accessor(datum);
         access.0 = Some(notifier);
@@ -288,7 +365,7 @@ mod tests {
     use crate::*;
     use std::any::TypeId;
 
-    #[derive(Clone)]
+    #[derive(Debug)]
     struct EmptyEvent;
 
     #[test]
@@ -364,6 +441,7 @@ mod tests {
 
         Notifier::split(
             &mut example,
+            &mut (),
             |x| &mut x.substructure,
             |system, substructure| {
                 substructure.generate_event(system);
@@ -376,7 +454,7 @@ mod tests {
 
     #[test]
     fn recursive_events() {
-        #[derive(Clone)]
+        #[derive(Debug)]
         struct ReactiveEvent;
 
         struct Example {
@@ -439,7 +517,7 @@ mod tests {
 
     #[test]
     fn downcasting_event() {
-        #[derive(Clone)]
+        #[derive(Debug)]
         struct NumberEvent {
             value: u8,
         }
@@ -468,5 +546,118 @@ mod tests {
         example.notify(&NumberEvent { value: 123 }, &mut ());
 
         assert_eq!(123, example.number);
+    }
+
+    #[test]
+    fn recursive_counting() {
+        struct Counter;
+
+        impl Notifiable for Counter {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                if let Some(NumberEvent(number)) = down(event) {
+                    if *number != 0 {
+                        self.notify(&NumberEvent(number - 1), system);
+                    }
+                }
+            }
+        }
+
+        #[derive(Debug)]
+        struct NumberEvent(pub i32);
+
+        let mut counter = Counter;
+        counter.notify(&NumberEvent(30), &mut ());
+    }
+
+    #[test]
+    fn nesting() {
+        struct A {
+            b: Notifier<B>,
+        }
+
+        struct B {
+            c: Notifier<C>,
+        }
+
+        struct C;
+
+        impl Notifiable for A {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                self.b.event(event, system);
+
+                if let Some(number) = down::<i32>(event) {
+                    if *number > 0 {
+                        self.notify(&(number - 1), system);
+                    } else {
+                        self.notify(&String::from("How dare you!"), system);
+                    }
+                }
+            }
+        }
+
+        impl Notifiable for B {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                self.c.event(event, system);
+            }
+        }
+
+        impl Notifiable for C {
+            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {}
+        }
+
+        impl A {
+            fn work(&mut self) {
+                Notifier::split(
+                    self,
+                    &mut (),
+                    |x| &mut x.b,
+                    |system, b| {
+                        b.work(system);
+                    },
+                );
+            }
+        }
+
+        impl B {
+            fn work(&mut self, system: &mut dyn Notifiable) {
+                Notifier::split(
+                    self,
+                    system,
+                    |x| &mut x.c,
+                    |system, c| {
+                        c.notify(&3, system);
+                    },
+                );
+            }
+        }
+
+        // Run the nested system
+
+        let mut a = A {
+            b: Notifier::new(B {
+                c: Notifier::new(C),
+            }),
+        };
+
+        a.work();
+    }
+
+    #[test]
+    fn te() {
+        #[derive(Debug)]
+        struct Dummy(u32);
+
+        impl Notifiable for Dummy {
+            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                if let Some(_) = down::<i32>(event) {
+                    self.notify(&"Response event", system);
+                }
+            }
+        }
+
+        let mut this = Dummy(0);
+        let mut system = Dummy(1);
+
+        this.notify(&0i32, &mut system);
     }
 }
