@@ -308,9 +308,7 @@ impl<'a, 'b> Notifiable for BinarySystem<'a, 'b> {
 /// Wrapper structure for notifiers.
 ///
 /// When a structure sends a notification, it must be split out from the tree structure it
-/// originates from. The reason for this is twofold:
-///
-/// 1. To avoid double-self notification.
+/// originates from.
 pub struct Notifier<T: Notifiable>(Option<T>);
 
 impl<T: Notifiable> Notifier<T> {
@@ -640,24 +638,5 @@ mod tests {
         };
 
         a.work();
-    }
-
-    #[test]
-    fn te() {
-        #[derive(Debug)]
-        struct Dummy(u32);
-
-        impl Notifiable for Dummy {
-            fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-                if let Some(_) = down::<i32>(event) {
-                    self.notify(&"Response event", system);
-                }
-            }
-        }
-
-        let mut this = Dummy(0);
-        let mut system = Dummy(1);
-
-        this.notify(&0i32, &mut system);
     }
 }
