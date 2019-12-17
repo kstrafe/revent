@@ -20,7 +20,7 @@
 //! # Example of basic usage #
 //!
 //! ```
-//! use revent::{Event, Notifiable};
+//! use revent::{Event, Ignore, Notifiable};
 //!
 //! struct X;
 //!
@@ -33,9 +33,7 @@
 //!
 //! let mut x = X;
 //!
-//! let system = &mut ();
-//!
-//! x.notify(&"This is an event, almost anything can be an event", system);
+//! x.notify(&"This is an event, almost anything can be an event", &mut Ignore);
 //! ```
 //!
 //! # The [Notifiable] wrapper #
@@ -51,7 +49,7 @@
 //! directly.
 //!
 //! ```
-//! use revent::{Event, Notifiable, Notifier};
+//! use revent::{Event, Ignore, Notifiable, Notifier};
 //!
 //! struct X {
 //!     y: Notifier<Y>,
@@ -60,7 +58,7 @@
 //!
 //! impl Notifiable for X {
 //!     fn event(&mut self, event: &dyn Event, _system: &mut dyn Notifiable) {
-//!         println!("{:?} arrived in X", event);
+//!         println!("{:?} arrived in X", event.type_id());
 //!     }
 //! }
 //!
@@ -75,18 +73,17 @@
 //! let mut x = Notifier::new(X { y: Notifier::new(Y) });
 //!
 //! // The root system, it's empty because we have nowhere to send events to.
-//! let system = &mut ();
+//! let system = &mut Ignore;
 //!
 //! // This removes `y` from the tree temporarily so it can be accessed while it's being given a
 //! // system that contains `x`, thus allowing `y` to send events to `x`.
-//! Notifier::split(
-//!     &mut x, // Which variable to "split"
-//!     system, // Root system (empty)
-//!     |x| &mut x.y, // Accessor for our `Notifier<_>` to split off
-//!     |system, y| { // closure to run on `Y`
-//!         y.notify(&"Hello world", system);
-//!     }
+//! let mut guard = Notifier::guard(
+//!     &mut x,       // Variable to extract a notifier from
+//!     |x| &mut x.y, // Path inside the variable to the notifier
+//!     system        // Previous system to add to the variable which we extract from
 //! );
+//! let (y, system) = guard.split(); // System contains both x and the previous system.
+//! y.notify(&"Hello world", system);
 //! ```
 //!
 //! # Nested structures #
@@ -100,7 +97,7 @@
 //! `self.notify` with the rest of the tree as the system - causing all notifiables to be updated.
 //!
 //! ```
-//! use revent::{down, Event, Notifiable, Notifier};
+//! use revent::{down, Event, Ignore, Notifiable, Notifier};
 //!
 //! // We make 3 classes as exemplified by the video player introduction above
 //!
@@ -146,14 +143,9 @@
 //! impl Client {
 //!     fn client_work(&mut self, system: &mut dyn Notifiable) {
 //!         // Let's load a new video, as per the introductory paragraph
-//!         Notifier::split(
-//!             self,
-//!             system, // The system to add to self
-//!             |x| &mut x.video, // The value to operate on
-//!             |system, video| {
-//!                 video.video_work(system);
-//!             },
-//!         );
+//!         let mut guard = Notifier::guard(self, |x| &mut x.video, system);
+//!         let (video, system) = guard.split();
+//!         video.video_work(system);
 //!     }
 //! }
 //!
@@ -181,7 +173,7 @@
 //!
 //! // By making the root system `&mut ()` we're essentially saying that the events stop here, we
 //! // have nowhere to send them to in this context (in `fn main`).
-//! let root_system = &mut ();
+//! let root_system = &mut Ignore;
 //!
 //! // Let's make sure the Gui's running time starts at 0
 //! assert_eq!(client.gui.running_time, 0);
@@ -203,7 +195,7 @@
 //! system.event(event, self)
 //! ```
 //!
-//! Meaning that the current struct will exhaust its own events first. After this has happend the
+//! Meaning that the current struct will exhaust its own events first. After this has happened the
 //! system events will run.
 //!
 //! ```
@@ -214,7 +206,7 @@
 //!
 //! impl Notifiable for Dummy {
 //!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-//!         println!("{:?}: {:?}", self, event);
+//!         println!("{:?}: {:?}", self, event.type_id());
 //!         if let Some(number) = down::<i32>(event) {
 //!             self.notify(&"Response event", system);
 //!         }
@@ -234,27 +226,18 @@
     unused_import_braces,
     unused_qualifications
 )]
-use std::{
-    any::Any,
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use std::any::Any;
 
 // ---
 
-/// A generic event. Implemented for all types.
-pub trait Event: Any + Debug {
-    /// Get the reference to this events' [Any]. Used for downcasting.
-    ///
-    /// Normally not used directly but rather used by [down].
-    fn as_any(&self) -> &dyn Any;
-}
+mod event;
+mod notifiable;
+mod notifier;
 
-impl<T: Any + Debug> Event for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+pub use event::Event;
+use notifiable::TypedBinarySystem;
+pub use notifiable::{Ignore, Notifiable};
+pub use notifier::{Notifier, NotifierGuard};
 
 // ---
 
@@ -264,99 +247,6 @@ pub fn down<T: 'static>(event: &dyn Event) -> Option<&T> {
 }
 
 // ---
-
-/// Main trait of this crate to implement on structures.
-pub trait Notifiable {
-    /// Handle the event for this structure. Call [Notifiable::notify] instead of this.
-    ///
-    /// What you should do: In this method delegate the event down to all fields that are
-    /// [Notifiable] and perform any internal changes to the structure to reflect the event.
-    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable);
-
-    /// Notify this structure and the system about an event.
-    ///
-    /// Calls [Notifiable::event] on both the current object and the system.
-    fn notify(&mut self, event: &dyn Event, system: &mut dyn Notifiable)
-    where
-        Self: Sized,
-    {
-        self.event(event, system);
-        let this: &mut dyn Notifiable = self;
-        system.event(event, this);
-    }
-}
-
-impl Notifiable for () {
-    fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {}
-}
-
-struct BinarySystem<'a, 'b>((&'a mut dyn Notifiable, &'b mut dyn Notifiable));
-
-impl<'a, 'b> Notifiable for BinarySystem<'a, 'b> {
-    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-        (self.0)
-            .0
-            .event(event, &mut BinarySystem((system, (self.0).1)));
-        (self.0)
-            .1
-            .event(event, &mut BinarySystem((system, (self.0).0)));
-    }
-}
-
-// ---
-
-/// Wrapper structure for notifiers.
-///
-/// When a structure sends a notification, it must be split out from the tree structure it
-/// originates from.
-pub struct Notifier<T: Notifiable>(Option<T>);
-
-impl<T: Notifiable> Notifier<T> {
-    /// Create a new [Notifier].
-    pub fn new(datum: T) -> Self {
-        Self(Some(datum))
-    }
-
-    /// Access a notifier inside a structure and supply the parent structure as the system.
-    pub fn split<O: Notifiable>(
-        datum: &mut O,
-        system: &mut dyn Notifiable,
-        mut accessor: impl FnMut(&mut O) -> &mut Notifier<T>,
-        mut mutator: impl FnMut(&mut dyn Notifiable, &mut T),
-    ) {
-        let access = accessor(datum);
-        let mut notifier = access.0.take().unwrap();
-
-        let mut nwa = BinarySystem((datum, system));
-
-        mutator(&mut nwa, &mut notifier);
-
-        let access = accessor(datum);
-        access.0 = Some(notifier);
-    }
-}
-
-impl<T: Notifiable> Deref for Notifier<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-
-impl<T: Notifiable> DerefMut for Notifier<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-
-impl<T: Notifiable> Notifiable for Notifier<T> {
-    fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-        if let Some(ref mut item) = self.0 {
-            item.event(event, system);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -386,7 +276,7 @@ mod tests {
 
         assert!(!example.seen_event);
 
-        example.notify(&EmptyEvent, &mut ());
+        example.notify(&EmptyEvent, &mut Ignore);
 
         assert!(example.seen_event);
     }
@@ -437,14 +327,11 @@ mod tests {
         assert!(!example.seen_event);
         assert!(!example.substructure.seen_event);
 
-        Notifier::split(
-            &mut example,
-            &mut (),
-            |x| &mut x.substructure,
-            |system, substructure| {
-                substructure.generate_event(system);
-            },
-        );
+        let system_root = &mut Ignore;
+        let mut guard = Notifier::guard(&mut example, |x| &mut x.substructure, system_root);
+        let (substructure, system) = guard.split();
+        substructure.generate_event(system);
+        drop(guard);
 
         assert!(example.seen_event);
         assert!(example.substructure.seen_event);
@@ -478,7 +365,7 @@ mod tests {
 
         assert!(!example.seen_reactive_event);
 
-        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&EmptyEvent {}, &mut Ignore);
 
         assert!(example.seen_reactive_event);
     }
@@ -503,13 +390,13 @@ mod tests {
 
         assert_eq!(0, example.seen_events);
 
-        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&EmptyEvent {}, &mut Ignore);
         assert_eq!(1, example.seen_events);
 
-        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&EmptyEvent {}, &mut Ignore);
         assert_eq!(2, example.seen_events);
 
-        example.notify(&EmptyEvent {}, &mut ());
+        example.notify(&EmptyEvent {}, &mut Ignore);
         assert_eq!(3, example.seen_events);
     }
 
@@ -538,10 +425,10 @@ mod tests {
 
         assert_eq!(0, example.number);
 
-        example.notify(&EmptyEvent {}, &mut ());
-        example.notify(&NumberEvent { value: 13 }, &mut ());
-        example.notify(&EmptyEvent {}, &mut ());
-        example.notify(&NumberEvent { value: 123 }, &mut ());
+        example.notify(&EmptyEvent {}, &mut Ignore);
+        example.notify(&NumberEvent { value: 13 }, &mut Ignore);
+        example.notify(&EmptyEvent {}, &mut Ignore);
+        example.notify(&NumberEvent { value: 123 }, &mut Ignore);
 
         assert_eq!(123, example.number);
     }
@@ -564,7 +451,7 @@ mod tests {
         struct NumberEvent(pub i32);
 
         let mut counter = Counter;
-        counter.notify(&NumberEvent(30), &mut ());
+        counter.notify(&NumberEvent(30), &mut Ignore);
     }
 
     #[test]
@@ -605,27 +492,18 @@ mod tests {
 
         impl A {
             fn work(&mut self) {
-                Notifier::split(
-                    self,
-                    &mut (),
-                    |x| &mut x.b,
-                    |system, b| {
-                        b.work(system);
-                    },
-                );
+                let root = &mut Ignore;
+                let mut guard = Notifier::guard(self, |x| &mut x.b, root);
+                let (b, system) = guard.split();
+                b.work(system);
             }
         }
 
         impl B {
             fn work(&mut self, system: &mut dyn Notifiable) {
-                Notifier::split(
-                    self,
-                    system,
-                    |x| &mut x.c,
-                    |system, c| {
-                        c.notify(&3, system);
-                    },
-                );
+                let mut guard = Notifier::guard(self, |x| &mut x.c, system);
+                let (c, system) = guard.split();
+                c.notify(&3, system);
             }
         }
 
@@ -638,5 +516,41 @@ mod tests {
         };
 
         a.work();
+    }
+
+    #[test]
+    fn autoreturner() {
+        struct A {
+            b: Notifier<B>,
+        }
+
+        impl Notifiable for A {
+            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
+                println!("A");
+            }
+        }
+
+        struct B;
+
+        impl Notifiable for B {
+            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
+                println!("B");
+            }
+        }
+
+        impl A {
+            fn check(&mut self) {
+                let x = &mut B;
+                let mut guard = Notifier::guard(self, |x| &mut x.b, x);
+                let (item, system) = guard.split();
+                item.notify(&1, system);
+                drop(guard);
+            }
+        }
+
+        let mut a = A {
+            b: Notifier::new(B),
+        };
+        a.check();
     }
 }
