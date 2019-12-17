@@ -1,7 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use revent::*;
 
-#[derive(Debug)]
 struct NumberEvent(pub i32);
 
 // ---

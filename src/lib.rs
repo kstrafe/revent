@@ -163,7 +163,6 @@
 //! }
 //!
 //! // A message that Video can send
-//! #[derive(Debug)]
 //! struct VideoChanged {
 //!     pub new_time: u32,
 //! }
@@ -201,7 +200,6 @@
 //! ```
 //! use revent::{down, Event, Notifiable, Notifier};
 //!
-//! #[derive(Debug)]
 //! struct Dummy(u32);
 //!
 //! impl Notifiable for Dummy {
@@ -253,7 +251,6 @@ mod tests {
     use crate::*;
     use std::any::TypeId;
 
-    #[derive(Debug)]
     struct EmptyEvent;
 
     #[test]
@@ -339,7 +336,6 @@ mod tests {
 
     #[test]
     fn recursive_events() {
-        #[derive(Debug)]
         struct ReactiveEvent;
 
         struct Example {
@@ -402,7 +398,6 @@ mod tests {
 
     #[test]
     fn downcasting_event() {
-        #[derive(Debug)]
         struct NumberEvent {
             value: u8,
         }
@@ -447,7 +442,6 @@ mod tests {
             }
         }
 
-        #[derive(Debug)]
         struct NumberEvent(pub i32);
 
         let mut counter = Counter;
