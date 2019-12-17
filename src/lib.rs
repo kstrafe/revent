@@ -451,10 +451,13 @@ mod tests {
 
     #[test]
     fn recursive_counting() {
-        struct Counter;
+        struct Counter {
+            seen: u32,
+        }
 
         impl Notifiable for Counter {
             fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                self.seen += 1;
                 if let Some(NumberEvent(number)) = down(event) {
                     if *number != 0 {
                         self.notify(&NumberEvent(number - 1), system);
@@ -465,24 +468,31 @@ mod tests {
 
         struct NumberEvent(pub i32);
 
-        let mut counter = Counter;
-        counter.notify(&NumberEvent(30), &mut Ignore);
+        let mut counter = Counter { seen: 0 };
+        counter.notify(&NumberEvent(1000), &mut Ignore);
+
+        assert_eq!(counter.seen, 1001);
     }
 
     #[test]
     fn nesting() {
         struct A {
+            seen: u32,
             b: Notifier<B>,
         }
 
         struct B {
+            seen: u32,
             c: Notifier<C>,
         }
 
-        struct C;
+        struct C {
+            seen: u32,
+        }
 
         impl Notifiable for A {
             fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                self.seen += 1;
                 self.b.event(event, system);
 
                 if let Some(number) = down::<i32>(event) {
@@ -497,12 +507,15 @@ mod tests {
 
         impl Notifiable for B {
             fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
+                self.seen += 1;
                 self.c.event(event, system);
             }
         }
 
         impl Notifiable for C {
-            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {}
+            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
+                self.seen += 1;
+            }
         }
 
         impl A {
@@ -525,47 +538,17 @@ mod tests {
         // Run the nested system
 
         let mut a = A {
+            seen: 0,
             b: Notifier::new(B {
-                c: Notifier::new(C),
+                seen: 0,
+                c: Notifier::new(C { seen: 0 }),
             }),
         };
 
         a.work();
-    }
 
-    #[test]
-    fn autoreturner() {
-        struct A {
-            b: Notifier<B>,
-        }
-
-        impl Notifiable for A {
-            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
-                println!("A");
-            }
-        }
-
-        struct B;
-
-        impl Notifiable for B {
-            fn event(&mut self, _: &dyn Event, _: &mut dyn Notifiable) {
-                println!("B");
-            }
-        }
-
-        impl A {
-            fn check(&mut self) {
-                let x = &mut B;
-                let mut guard = Notifier::guard(self, |x| &mut x.b, x);
-                let (item, system) = guard.split();
-                item.notify(&1, system);
-                drop(guard);
-            }
-        }
-
-        let mut a = A {
-            b: Notifier::new(B),
-        };
-        a.check();
+        assert_eq!(a.seen, 5);
+        assert_eq!(a.b.seen, 5);
+        assert_eq!(a.b.c.seen, 5);
     }
 }
