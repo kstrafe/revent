@@ -204,7 +204,7 @@
 //!
 //! impl Notifiable for Dummy {
 //!     fn event(&mut self, event: &dyn Event, system: &mut dyn Notifiable) {
-//!         println!("{:?}: {:?}", self, event.type_id());
+//!         println!("Dummy({}): {:?}", self.0, event.type_id());
 //!         if let Some(number) = down::<i32>(event) {
 //!             self.notify(&"Response event", system);
 //!         }

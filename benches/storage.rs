@@ -35,14 +35,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("one way event", |b| {
         let mut sink = Sink;
         b.iter(|| {
-            sink.notify(&black_box(NumberEvent(1)), &mut ());
+            sink.notify(&black_box(NumberEvent(1)), &mut Ignore);
         });
     });
 
     c.bench_function("counter", |b| {
         let mut counter = Counter;
         b.iter(|| {
-            counter.notify(&black_box(NumberEvent(1000)), &mut ());
+            counter.notify(&black_box(NumberEvent(1000)), &mut Ignore);
         });
     });
 }
