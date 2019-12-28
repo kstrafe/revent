@@ -50,7 +50,7 @@
 //! }
 //!
 //! impl Selfscribe<Sub> for X {
-//!     fn subscribe(&mut self, this: &Hubbed<Self>, hub: &mut Sub) {
+//!     fn subscribe(&mut self, this: &Hubbed<Self>, sub: &mut Sub) {
 //!         // Make `X` subscribe to the signal `signal`.
 //!         hub.signal(this);
 //!     }
