@@ -1,6 +1,6 @@
 [package]
 name = "revent"
-version = "0.5.2"
+version = "0.6.0-rc.1"
 license = "LGPL-3.0"
 description = "Event system for Rust"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
@@ -13,5 +13,5 @@ homepage = "https://github.com/BourgondAries/revent.git"
 criterion = "0.3"
 
 [[bench]]
-name = "storage"
+name = "basic"
 harness = false
