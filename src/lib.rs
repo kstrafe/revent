@@ -130,11 +130,6 @@ macro_rules! hub {
                 }
             }
 
-            #[doc(hidden)]
-            pub fn manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
-                self._manager.clone()
-            }
-
             /// Insert a subscriber into the hub.
             pub fn subscribe<T: $crate::Subscriber<Self>>(&self, input: T::Input) {
                 self.manager().borrow_mut().begin_construction();
@@ -150,6 +145,11 @@ macro_rules! hub {
                     $($channel: self.$channel.clone_deactivate()),*,
                     _manager: self.manager().clone(),
                 }
+            }
+
+            #[doc(hidden)]
+            pub fn manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
+                self._manager.clone()
             }
         }
     };
