@@ -323,4 +323,41 @@ mod tests {
         hub.subscribe::<X>(());
         hub.subscribe::<Y>(());
     }
+
+    #[test]
+    fn no_subscription_is_dropped() {
+        use std::{cell::Cell, rc::Rc};
+
+        pub trait Event {}
+
+        hub! {
+            Hub {
+                event: dyn Event,
+            }
+        }
+
+        let hub = Hub::default();
+
+        struct X {
+            dropped: Rc<Cell<bool>>,
+        }
+        impl Event for X {}
+        impl Subscriber<Hub> for X {
+            type Input = Rc<Cell<bool>>;
+            fn build(_: Hub, input: Self::Input) -> Self {
+                Self { dropped: input }
+            }
+            fn subscribe(_: &Hub, _: Shared<Self>) {}
+        }
+        impl Drop for X {
+            fn drop(&mut self) {
+                self.dropped.set(true);
+            }
+        }
+
+        let dropped: Rc<Cell<bool>> = Default::default();
+        assert_eq!(dropped.get(), false);
+        hub.subscribe::<X>(dropped.clone());
+        assert_eq!(dropped.get(), true);
+    }
 }
