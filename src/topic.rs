@@ -15,6 +15,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     /// The `caller` variable is applied once to every single subscriber of this topic. Use this function to call the various methods on the subscribers.
     /// Subscribers are applied to `caller` in arbitrary order.
     pub fn emit(&self, mut caller: impl FnMut(&mut T)) {
+        self.manager.borrow_mut().emitting(self.name);
         if !self.active {
             panic!("Topic is not active: {}", self.name);
         }

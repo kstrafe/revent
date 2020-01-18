@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Manage all dependencies to ensure there are no recursive events.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[doc(hidden)]
 pub struct Manager {
     /// Construction flag. Set by the hub when we are constructing something.
@@ -12,18 +12,29 @@ pub struct Manager {
 
     listens: BTreeSet<&'static str>,
     emissions: BTreeSet<&'static str>,
+
+    #[cfg(feature = "slog")]
+    pub log: slog::Logger,
+}
+
+impl Default for Manager {
+    fn default() -> Self {
+        Self {
+            construction: false,
+            subscriptions: Default::default(),
+            listens: Default::default(),
+            emissions: Default::default(),
+            #[cfg(feature = "slog")]
+            log: slog::Logger::root(slog::Discard, slog::o!()),
+        }
+    }
 }
 
 impl Manager {
-    /// Begin the construction of a new subscriber in the manager.
-    #[doc(hidden)]
     pub fn begin_construction(&mut self) {
         self.construction = true;
     }
 
-    /// Inform the manager that the current object under construction wishes to emit to the
-    /// given channel.
-    #[doc(hidden)]
     pub fn activate_channel(&mut self, name: &'static str) {
         if !self.construction {
             panic!("Activating a channel outside of construction context");
@@ -31,16 +42,10 @@ impl Manager {
         self.emissions.insert(name);
     }
 
-    /// Inform the manager that the current object under construction wishes to subscribe to
-    /// the given channel.
-    #[doc(hidden)]
     pub fn subscribe_channel(&mut self, name: &'static str) {
         self.listens.insert(name);
     }
 
-    /// End the construction of a new subscriber. Checks whether any dependency loops exist
-    /// and panics if they do.
-    #[doc(hidden)]
     pub fn end_construction(&mut self) {
         for from in &self.listens {
             let set = self.subscriptions.entry(from).or_insert_with(BTreeSet::new);
@@ -48,11 +53,21 @@ impl Manager {
                 set.insert(to);
             }
         }
+        #[cfg(feature = "slog")]
+        slog::debug!(self.log, "Object constructed"; "listens" => format!("{:?}", self.listens), "emissions" => format!("{:?}", self.emissions));
         chkrec(&self.subscriptions);
         self.listens.clear();
         self.emissions.clear();
         self.construction = false;
     }
+
+    #[cfg(feature = "slog")]
+    pub fn emitting(&self, name: &'static str) {
+        slog::trace!(self.log, "Emitting on: {}", name);
+    }
+
+    #[cfg(not(feature = "slog"))]
+    pub fn emitting(&self, _: &'static str) {}
 }
 
 fn chkrec(set: &BTreeMap<&'static str, BTreeSet<&'static str>>) {

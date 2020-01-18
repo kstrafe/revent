@@ -3,18 +3,18 @@ use revent::{hub, Shared, Subscriber};
 
 // First we declare two event channels (they _can_ have the same trait but they are different to
 // make the example more clear).
-pub trait MyEvent1 {
+pub trait Event1Handler {
     fn event(&mut self);
 }
 
-pub trait MyEvent2 {
+pub trait Event2Handler {
     fn event(&mut self);
 }
 
 hub! {
     Hub {
-        event1: dyn MyEvent1,
-        event2: dyn MyEvent2,
+        event1: dyn Event1Handler,
+        event2: dyn Event2Handler,
     }
 }
 
@@ -25,7 +25,7 @@ fn main() {
     struct MyEvent1Handler {
         hub: Hub,
     }
-    impl MyEvent1 for MyEvent1Handler {
+    impl Event1Handler for MyEvent1Handler {
         fn event(&mut self) {
             println!("Event 1");
             self.hub.event2.emit(|x| {
@@ -52,7 +52,7 @@ fn main() {
 
     // Make the handler for `event2`.
     struct MyEvent2Handler;
-    impl MyEvent2 for MyEvent2Handler {
+    impl Event2Handler for MyEvent2Handler {
         fn event(&mut self) {
             println!("Event 2");
         }

@@ -5,7 +5,7 @@ use revent::{hub, Shared, Subscriber};
 // You define your own traits for various event types.
 // An object can listen to multiple event types by implementing multiple traits.
 // In this example we just define a single trait for a single type.
-pub trait MyEvent {
+pub trait EventHandler {
     fn event(&mut self);
 }
 
@@ -20,7 +20,7 @@ hub! {
         // All these channels are comma-separated.
         //
         // In this example we have just 1 channel.
-        basic: dyn MyEvent,
+        basic: dyn EventHandler,
     }
 }
 
@@ -32,7 +32,7 @@ fn main() {
     //
     // We implement the trait for a type so it can be inserted into a channel in the hub.
     struct MyEventHandler;
-    impl MyEvent for MyEventHandler {
+    impl EventHandler for MyEventHandler {
         fn event(&mut self) {
             println!("Hello world");
         }
