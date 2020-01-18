@@ -9,7 +9,7 @@ pub struct Topic<T: 'static + ?Sized> {
     active: bool,
     manager: Rc<RefCell<Manager>>,
     name: &'static str,
-    subscribers: Rc<RefCell<Vec<Rc<UnsafeCell<T>>>>>,
+    subscribers: Rc<RefCell<Vec<Shared<T>>>>,
 }
 
 impl<T: 'static + ?Sized> Topic<T> {
@@ -26,7 +26,7 @@ impl<T: 'static + ?Sized> Topic<T> {
             panic!("Can not emit while an object is under construction");
         }
         for subscriber in self.subscribers.borrow_mut().iter() {
-            caller(unsafe { &mut *subscriber.get() });
+            caller(unsafe { &mut *subscriber.0.get() });
         }
     }
 
@@ -35,7 +35,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     /// [Subscriber](crate::Subscriber) subscribe to hub topics.
     pub fn subscribe(&self, shared: Shared<T>) {
         self.manager.borrow_mut().subscribe_channel(self.name);
-        self.subscribers.borrow_mut().push(shared.0);
+        self.subscribers.borrow_mut().push(shared);
     }
 
     /// Activate this channel instance.

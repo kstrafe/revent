@@ -6,10 +6,7 @@ use std::{cell::UnsafeCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
 /// [Topic::subscribe](crate::Topic::subscribe) and provided in
 /// [Subscriber::subscribe](crate::Subscriber::subscribe).
 pub struct Shared<T: ?Sized>(
-    /// Do not rely on this variable. It may change and has been marked undocumented. It is
-    /// only used internally by this library and in the macro generated code.
-    #[doc(hidden)]
-    pub Rc<UnsafeCell<T>>,
+    pub(crate) Rc<UnsafeCell<T>>,
 );
 
 impl<T> Shared<T> {
