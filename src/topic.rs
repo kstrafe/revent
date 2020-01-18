@@ -1,12 +1,15 @@
 use crate::{Manager, Shared};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{RefCell, UnsafeCell},
+    rc::Rc,
+};
 
 /// An event channel for a certain class of subscribers.
 pub struct Topic<T: 'static + ?Sized> {
     active: bool,
     manager: Rc<RefCell<Manager>>,
     name: &'static str,
-    subscribers: Rc<RefCell<Vec<Rc<RefCell<T>>>>>,
+    subscribers: Rc<RefCell<Vec<Rc<UnsafeCell<T>>>>>,
 }
 
 impl<T: 'static + ?Sized> Topic<T> {
@@ -23,7 +26,7 @@ impl<T: 'static + ?Sized> Topic<T> {
             panic!("Can not emit while an object is under construction");
         }
         for subscriber in self.subscribers.borrow_mut().iter() {
-            caller(&mut *subscriber.borrow_mut());
+            caller(unsafe { &mut *subscriber.get() });
         }
     }
 

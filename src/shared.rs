@@ -1,4 +1,4 @@
-use std::{cell::RefCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
+use std::{cell::UnsafeCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
 
 /// An opaque struct containing a shared reference to a subscriber.
 ///
@@ -9,8 +9,15 @@ pub struct Shared<T: ?Sized>(
     /// Do not rely on this variable. It may change and has been marked undocumented. It is
     /// only used internally by this library and in the macro generated code.
     #[doc(hidden)]
-    pub Rc<RefCell<T>>,
+    pub Rc<UnsafeCell<T>>,
 );
+
+impl<T> Shared<T> {
+    #[doc(hidden)]
+    pub fn new(item: T) -> Self {
+        Self(Rc::new(UnsafeCell::new(item)))
+    }
+}
 
 impl<T> Clone for Shared<T> {
     fn clone(&self) -> Self {

@@ -64,7 +64,6 @@
     missing_docs,
     trivial_casts,
     trivial_numeric_casts,
-    unsafe_code,
     unused_import_braces,
     unused_qualifications
 )]
@@ -148,7 +147,7 @@ macro_rules! hub {
             pub fn subscribe<T: $crate::Subscriber<Self>>(&self, input: T::Input) {
                 self.manager().borrow_mut().begin_construction();
                 let hub = self.clone_deactivate();
-                let shared = $crate::Shared(::std::rc::Rc::new(::std::cell::RefCell::new(T::build(hub, input))));
+                let shared = $crate::Shared::new(T::build(hub, input));
                 T::subscribe(self, shared);
                 self.manager().borrow_mut().end_construction();
             }
@@ -190,7 +189,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::*;
-        use std::{cell::Cell, rc::Rc};
+    use std::{cell::Cell, rc::Rc};
 
     #[test]
     fn simple_listener() {
@@ -388,9 +387,7 @@ mod tests {
         impl Subscriber<Hub> for Y {
             type Input = Rc<Cell<usize>>;
             fn build(_: Hub, called: Self::Input) -> Self {
-                Self {
-                    called
-                }
+                Self { called }
             }
             fn subscribe(hub: &Hub, shared: Shared<Self>) {
                 hub.event1.subscribe(shared.clone());
@@ -420,7 +417,6 @@ mod tests {
 
     #[test]
     fn no_subscription_is_dropped() {
-
         pub trait EventHandler {}
 
         hub! {
