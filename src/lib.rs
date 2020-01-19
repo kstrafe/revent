@@ -659,7 +659,7 @@ mod tests {
         });
         assert_eq!(count, 3);
 
-        hub.event.filter(|x| x.remove_me());
+        hub.event.remove(|x| x.remove_me());
 
         let mut count = 0;
         hub.event.emit(|_| {
@@ -667,7 +667,7 @@ mod tests {
         });
         assert_eq!(count, 1);
 
-        hub.event.filter(|x| !x.remove_me());
+        hub.event.remove(|x| !x.remove_me());
 
         let mut count = 0;
         hub.event.emit(|_| {

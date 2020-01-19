@@ -63,7 +63,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             for _ in 0..1000 {
                 hub.subscribe::<Handler>(());
             }
-            black_box(&mut hub).signal.filter(|_| true);
+            black_box(&mut hub).signal.remove(|_| true);
         });
     });
 
