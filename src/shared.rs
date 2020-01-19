@@ -1,10 +1,6 @@
 use std::{cell::UnsafeCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
 
 /// An opaque struct containing a shared reference to a subscriber.
-///
-/// Used in
-/// [Topic::subscribe](crate::Topic::subscribe) and provided in
-/// [Subscriber::subscribe](crate::Subscriber::subscribe).
 pub struct Shared<T: ?Sized>(pub(crate) Rc<UnsafeCell<T>>);
 
 impl<T> Shared<T> {

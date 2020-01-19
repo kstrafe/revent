@@ -5,13 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone)]
 #[doc(hidden)]
 pub struct Manager {
-    /// Construction flag. Set by the hub when we are constructing something.
-    #[doc(hidden)]
-    pub construction: bool,
     subscriptions: BTreeMap<&'static str, BTreeSet<&'static str>>,
 
-    listens: BTreeSet<&'static str>,
-    emissions: BTreeSet<&'static str>,
+    listens: Vec<BTreeSet<&'static str>>,
+    emissions: Vec<BTreeSet<&'static str>>,
 
     #[cfg(feature = "slog")]
     pub log: slog::Logger,
@@ -20,7 +17,6 @@ pub struct Manager {
 impl Default for Manager {
     fn default() -> Self {
         Self {
-            construction: false,
             subscriptions: Default::default(),
             listens: Default::default(),
             emissions: Default::default(),
@@ -41,33 +37,41 @@ impl Manager {
     }
 
     pub fn begin_construction(&mut self) {
-        self.construction = true;
+        self.listens.push(Default::default());
+        self.emissions.push(Default::default());
     }
 
     pub fn activate_channel(&mut self, name: &'static str) {
-        if !self.construction {
+        if !self.is_constructing() {
             panic!("Activating a channel outside of construction context");
         }
-        self.emissions.insert(name);
+        self.emissions.last_mut().unwrap().insert(name);
     }
 
     pub fn subscribe_channel(&mut self, name: &'static str) {
-        self.listens.insert(name);
+        self.listens.last_mut().unwrap().insert(name);
     }
 
     pub fn end_construction(&mut self) {
-        for from in &self.listens {
+        for from in self.listens.last().unwrap().iter() {
             let set = self.subscriptions.entry(from).or_insert_with(BTreeSet::new);
-            for to in &self.emissions {
+            for to in self.emissions.last().unwrap().iter() {
                 set.insert(to);
             }
         }
         #[cfg(feature = "slog")]
-        slog::debug!(self.log, "Object constructed"; "listens" => format!("{:?}", self.listens), "emissions" => format!("{:?}", self.emissions));
+        slog::debug!(self.log, "Object constructed";
+            "listens" => format!("{:?}", self.listens.last().unwrap()),
+            "emissions" => format!("{:?}", self.emissions.last().unwrap())
+        );
         chkrec(&self.subscriptions);
-        self.listens.clear();
-        self.emissions.clear();
-        self.construction = false;
+        self.listens.pop();
+        self.emissions.pop();
+    }
+
+    pub fn is_constructing(&self) -> bool {
+        debug_assert_eq!(self.emissions.len(), self.listens.len());
+        !self.emissions.is_empty()
     }
 
     #[cfg(feature = "slog")]

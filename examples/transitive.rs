@@ -1,5 +1,5 @@
 // This example shows how you can emit events from within an event handler.
-use revent::{hub, Shared, Subscriber};
+use revent::{hub, Subscriber};
 
 // First we declare two event channels (they _can_ have the same trait but they are different to
 // make the example more clear).
@@ -22,8 +22,15 @@ fn main() {
     let mut hub = Hub::new();
 
     // Make the handler for `event1`.
+    hub! {
+        HandlerHub1: Hub {
+            event2: dyn Event2Handler,
+        } subscribe MyEvent1Handler {
+            event1,
+        }
+    }
     struct MyEvent1Handler {
-        hub: Hub,
+        hub: HandlerHub1,
     }
     impl Event1Handler for MyEvent1Handler {
         fn event(&mut self) {
@@ -33,37 +40,32 @@ fn main() {
             });
         }
     }
-    impl Subscriber<Hub> for MyEvent1Handler {
+    impl Subscriber for MyEvent1Handler {
+        type Hub = HandlerHub1;
         type Input = ();
-        fn build(mut hub: Hub, _: Self::Input) -> Self {
-            // The hub which `build` is called with has all its channels deactivated,
-            // meaning that you need to manually activate them here. If you use a
-            // channel that is inactive you will get an error at run-time. The reason
-            // for doing this is so we can detect recursions without being dependent
-            // on run-time state.
-            hub.event2.activate();
+        fn build(hub: Self::Hub, _: Self::Input) -> Self {
             Self { hub }
-        }
-
-        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-            hub.event1.subscribe(shared);
         }
     }
 
     // Make the handler for `event2`.
+    hub! {
+        HandlerHub2: Hub {
+        } subscribe MyEvent2Handler {
+            event2,
+        }
+    }
     struct MyEvent2Handler;
     impl Event2Handler for MyEvent2Handler {
         fn event(&mut self) {
             println!("Event 2");
         }
     }
-    impl Subscriber<Hub> for MyEvent2Handler {
+    impl Subscriber for MyEvent2Handler {
+        type Hub = HandlerHub2;
         type Input = ();
-        fn build(_: Hub, _: Self::Input) -> Self {
+        fn build(_: Self::Hub, _: Self::Input) -> Self {
             MyEvent2Handler
-        }
-        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-            hub.event2.subscribe(shared);
         }
     }
 

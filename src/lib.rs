@@ -1,8 +1,8 @@
 //! Event broker library for Rust.
 //!
-//! Implements a synchronous transitive event broker that does not violate mutability constraints.
-//! It does so by performing DAG traversals to ensure that no signal chains are able
-//! to form a loop.
+//! Implements a synchronous event broker that does not violate mutability constraints.
+//! It does so by performing DAG traversals at initialization-time to ensure that no signal
+//! chains are able to form a loop.
 //!
 //! # What is an event broker? #
 //!
@@ -13,21 +13,39 @@
 //! on.
 //!
 //! ```
-//! use revent::{hub, Shared, Subscriber};
+//! use revent::{hub, Subscriber};
 //!
 //! // Construct a trait for some type of event.
-//! trait MyEventHandler {
+//! pub trait MyEventHandler {
 //!     fn my_event(&mut self);
 //! }
 //!
 //! // Create an event hub.
+//! // This event hub is the "top level" event hub, it is owned by the calling code and must list
+//! // all events that this system will have. It is a comma-separaetd list of the form `name: type`.
 //! hub! {
 //!     Hub {
 //!         event: dyn MyEventHandler,
 //!     }
 //! }
 //!
-//! // Construct a hub object.
+//! // Create a derivative event hub.
+//! // This event hub specifies which of the "top level" event hub signals it wishes to signal
+//! // and subscribe to.
+//! hub! {
+//!     // Name of the new derivative hub.
+//!     XHub: Hub {
+//!     //    ^^^ - Hub to base itself of, these can also be other derivative event hubs. Is a
+//!     // list of comma-separated hubs.
+//!         // Here comes a list of signals we want to notify, currently there are none.
+//!     } subscribe X {
+//!     //          ^ - Structure to bind to this derivative hub.
+//!         event,
+//!     //  ^^^^^ - We make X subscribe to the `event` channel.
+//!     }
+//! }
+//!
+//! // Construct a top-level hub object.
 //! let mut hub = Hub::default();
 //!
 //! // Implement a subscriber to some event.
@@ -37,13 +55,12 @@
 //!         println!("Hello world");
 //!     }
 //! }
-//! impl Subscriber<Hub> for X {
+//! impl Subscriber for X {
+//!     // Connect X to the XHub created by the macro.
+//!     type Hub = XHub;
 //!     type Input = ();
-//!     fn build(_: Hub, input: Self::Input) -> Self {
+//!     fn build(_: Self::Hub, input: Self::Input) -> Self {
 //!         Self
-//!     }
-//!     fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-//!         hub.event.subscribe(shared);
 //!     }
 //! }
 //!
@@ -61,7 +78,7 @@
 //! Use `feature = "slog"` to add a method `log` to the hub generated from the [hub] macro.
 //! This method sets a logger object.
 #![deny(
-    missing_docs,
+    // missing_docs,
     trivial_casts,
     trivial_numeric_casts,
     unused_import_braces,
@@ -77,7 +94,7 @@ pub use mng::Manager;
 pub use shared::Shared;
 pub use topic::Topic;
 
-/// Generate an event hub and its associated boilerplate code.
+/// Generate an event hub or a derivative and its associated boilerplate code.
 ///
 /// ```
 /// use revent::hub;
@@ -97,7 +114,7 @@ pub use topic::Topic;
 /// let mut my_hub = MyHub::new();
 ///
 /// my_hub.channel_name1.emit(|_| {
-///     // Do something with each subscriber of channel_name1.
+///     // Do something with each subscriber of `channel_name1`.
 /// });
 /// ```
 ///
@@ -110,13 +127,13 @@ macro_rules! hub {
         ///
         /// Contains various topics which can be emitted into or subscribed to.
         pub struct $hub {
-            $(
-                /// Channel for the given type of event handler.
-                pub $channel: $crate::Topic<$type>
-            ),*,
             // TODO: When gensyms are supported make this symbol a gensym.
             #[doc(hidden)]
             pub _manager: ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>>,
+            $(
+                /// Channel for the given type of event handler.
+                pub $channel: $crate::Topic<$type>
+            ),*
         }
 
         impl Default for $hub {
@@ -129,9 +146,12 @@ macro_rules! hub {
             /// Create a new hub.
             pub fn new() -> Self {
                 let mng = ::std::rc::Rc::new(::std::cell::RefCell::new($crate::Manager::default()));
+                $(
+                    let $channel = $crate::Topic::new(stringify!($channel), &mng);
+                )*
                 Self {
-                    $($channel: $crate::Topic::new(stringify!($channel), &mng)),*,
                     _manager: mng,
+                    $($channel),*
                 }
             }
 
@@ -144,11 +164,17 @@ macro_rules! hub {
             }
 
             /// Insert a subscriber into the hub.
-            pub fn subscribe<T: $crate::Subscriber<Self>>(&mut self, input: T::Input) {
+            #[allow(dead_code)]
+            pub fn subscribe<T: $crate::Subscriber + $crate::Selfscriber<Self>>(&mut self, input: T::Input)
+                where T::Hub: for<'a> ::std::convert::TryFrom<&'a Self, Error = ()>,
+            {
                 self.manager().borrow_mut().begin_construction();
-                let hub = self.clone_deactivate();
+                let hub: T::Hub = match ::std::convert::TryInto::try_into(&*self) {
+                    Ok(hub) => hub,
+                    Err(()) => panic!("Internal error: Unable to construct sub-hub."),
+                };
                 let shared = $crate::Shared::new(T::build(hub, input));
-                T::subscribe(self, shared);
+                $crate::Selfscriber::subscribe(self, shared);
                 self.manager().borrow_mut().end_construction();
             }
 
@@ -159,37 +185,94 @@ macro_rules! hub {
             }
 
             #[doc(hidden)]
-            fn clone_deactivate(&self) -> Self {
-                Self {
-                    $($channel: self.$channel.clone_deactivate()),*,
-                    _manager: self.manager().clone(),
-                }
-            }
-
-            #[doc(hidden)]
             pub fn manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
                 self._manager.clone()
             }
         }
     };
+
+
+    ($hub:ident: $derives:ty $(,)? { $($channel:ident: $type:ty),*$(,)? }
+     subscribe $structure:ident { $($subscription:ident),*$(,)? }) => {
+        hub! {
+            $hub { $($channel: $type),* }
+        }
+
+        hub! { subscriber $structure, $derives, $($subscription),* }
+
+        impl ::std::convert::TryFrom<&$derives> for $hub {
+            type Error = ();
+            fn try_from(hub: &$derives) -> ::std::result::Result<Self, Self::Error> {
+                Ok(Self {
+                    _manager: hub._manager.clone(),
+                    $($channel: unsafe { hub.$channel.clone_activate() }),*
+                })
+            }
+        }
+    };
+
+    ($hub:ident: $derives:ty, $($rest:ty),+ $(,)? { $($channel:ident: $type:ty),*$(,)? }
+     subscribe $structure:ident { $($subscription:ident),*$(,)? }) => {
+        hub! {
+            $hub: $($rest),* { $($channel: $type),* } subscribe $structure { $($subscription),* }
+        }
+
+        hub! { subscriber $structure, $derives, $($subscription),* }
+
+        impl ::std::convert::TryFrom<&$derives> for $hub {
+            type Error = ();
+            fn try_from(hub: &$derives) -> ::std::result::Result<Self, Self::Error> {
+                Ok(
+                    Self {
+                        _manager: hub._manager.clone(),
+                        $($channel: hub.$channel.clone_activate()),*
+                    }
+                )
+            }
+        }
+    };
+
+    (subscriber $structure:ident, $derivative:ty,) => {
+        impl $crate::Selfscriber<$derivative> for $structure {
+            fn subscribe(_: &mut $derivative, _: $crate::Shared<Self>) {}
+        }
+    };
+
+    (subscriber $structure:ident, $derivative:ty, $($subscriptions:ident),*) => {
+        impl $crate::Selfscriber<$derivative> for $structure {
+            fn subscribe(hub: &mut $derivative, shared: $crate::Shared<Self>) {
+                unsafe {
+                    $(
+                        hub.$subscriptions.subscribe(shared.clone());
+                    )*
+                }
+            }
+        }
+    };
+}
+
+/// Implements channel subscription for a given hub.
+///
+/// Automatically implemented for all hub dependencies by the [hub] macro. It is highly advised to
+/// use the macro instead of implementing this trait directly. This trait is public as an artifact
+/// of the macro requiring public access.
+pub trait Selfscriber<T> {
+    fn subscribe(hub: &mut T, shared: Shared<Self>);
 }
 
 /// Subscriber to an event hub.
 ///
-/// Is used by the `subscribe` function generated by the [hub](hub) macro.
-pub trait Subscriber<T>
+/// Is used by the `subscribe` function generated by the [hub] macro.
+pub trait Subscriber
 where
     Self: Sized,
 {
+    /// Hub type to associate with the subscriber.
+    type Hub;
     /// Input data to the build function.
     type Input;
-    /// Build an object using any hub and arbitrary input.
-    fn build(hub: T, input: Self::Input) -> Self;
-    /// Subscribe to a specific hub.
-    ///
-    /// This function wraps the self object inside an opaque wrapper which can be used on
-    /// [Topic::subscribe].
-    fn subscribe(hub: &mut T, shared: Shared<Self>);
+    /// Build an instance of the subscriber.
+    fn build(hub: Self::Hub, input: Self::Input) -> Self;
 }
 
 #[cfg(test)]
@@ -207,17 +290,22 @@ mod tests {
             }
         }
 
+        hub! {
+            XHub: Hub {
+            } subscribe X {
+                event,
+            }
+        }
+
         let mut hub = Hub::default();
 
         struct X;
         impl EventHandler for X {}
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = ();
-            fn build(_: Hub, _: Self::Input) -> Self {
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event.subscribe(shared);
             }
         }
 
@@ -228,76 +316,6 @@ mod tests {
             count += 1;
         });
         assert_eq!(count, 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "Topic is not active (emit): event2")]
-    fn emit_on_non_activated_channel() {
-        pub trait EventHandler {
-            fn event(&mut self);
-        }
-
-        hub! {
-            Hub {
-                event1: dyn EventHandler,
-                event2: dyn EventHandler,
-            }
-        }
-
-        let mut hub = Hub::default();
-
-        struct X {
-            hub: Hub,
-        }
-        impl EventHandler for X {
-            fn event(&mut self) {
-                self.hub.event2.emit(|_| {});
-            }
-        }
-        impl Subscriber<Hub> for X {
-            type Input = ();
-            fn build(hub: Hub, _: Self::Input) -> Self {
-                Self { hub }
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event1.subscribe(shared);
-            }
-        }
-
-        hub.subscribe::<X>(());
-
-        hub.event1.emit(|x| {
-            x.event();
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Recursion detected: [\"event\"]")]
-    fn recursion_to_self() {
-        pub trait EventHandler {}
-
-        hub! {
-            Hub {
-                event: dyn EventHandler,
-            }
-        }
-
-        let mut hub = Hub::default();
-
-        struct X;
-        impl EventHandler for X {}
-        impl Subscriber<Hub> for X {
-            type Input = ();
-            fn build(mut hub: Hub, _: Self::Input) -> Self {
-                hub.event.activate();
-                Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event.subscribe(shared);
-            }
-        }
-
-        hub.subscribe::<X>(());
     }
 
     #[test]
@@ -312,31 +330,41 @@ mod tests {
             }
         }
 
+        hub! {
+            XHub: Hub {
+                event1: dyn EventHandler,
+            } subscribe X {
+                event2,
+            }
+        }
+
+        hub! {
+            YHub: Hub {
+                event2: dyn EventHandler,
+            } subscribe Y {
+                event1,
+            }
+        }
+
         let mut hub = Hub::default();
 
         struct X;
         impl EventHandler for X {}
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = ();
-            fn build(mut hub: Hub, _: Self::Input) -> Self {
-                hub.event1.activate();
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event2.subscribe(shared);
             }
         }
 
         struct Y;
         impl EventHandler for Y {}
-        impl Subscriber<Hub> for Y {
+        impl Subscriber for Y {
+            type Hub = YHub;
             type Input = ();
-            fn build(mut hub: Hub, _: Self::Input) -> Self {
-                hub.event2.activate();
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event1.subscribe(shared);
             }
         }
 
@@ -359,8 +387,15 @@ mod tests {
 
         let mut hub = Hub::default();
 
+        hub! {
+            XHub: Hub {
+                event2: dyn EventHandler,
+            } subscribe X {
+                event1,
+            }
+        }
         struct X {
-            hub: Hub,
+            hub: XHub,
             called: Rc<Cell<usize>>,
         }
         impl EventHandler for X {
@@ -371,17 +406,21 @@ mod tests {
                 });
             }
         }
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = Rc<Cell<usize>>;
-            fn build(mut hub: Hub, called: Self::Input) -> Self {
-                hub.event2.activate();
+            fn build(hub: Self::Hub, called: Self::Input) -> Self {
                 Self { hub, called }
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event1.subscribe(shared);
             }
         }
 
+        hub! {
+            YHub: Hub {
+            } subscribe Y {
+                event1,
+                event2,
+            }
+        }
         struct Y {
             called: Rc<Cell<usize>>,
         }
@@ -390,14 +429,11 @@ mod tests {
                 self.called.set(self.called.get() + 1);
             }
         }
-        impl Subscriber<Hub> for Y {
+        impl Subscriber for Y {
+            type Hub = YHub;
             type Input = Rc<Cell<usize>>;
-            fn build(_: Hub, called: Self::Input) -> Self {
+            fn build(_: Self::Hub, called: Self::Input) -> Self {
                 Self { called }
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event1.subscribe(shared.clone());
-                hub.event2.subscribe(shared);
             }
         }
 
@@ -431,18 +467,24 @@ mod tests {
             }
         }
 
+        hub! {
+            XHub: Hub {
+            } subscribe X {
+            }
+        }
+
         let mut hub = Hub::default();
 
         struct X {
             dropped: Rc<Cell<bool>>,
         }
         impl EventHandler for X {}
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = Rc<Cell<bool>>;
-            fn build(_: Hub, input: Self::Input) -> Self {
+            fn build(_: Self::Hub, input: Self::Input) -> Self {
                 Self { dropped: input }
             }
-            fn subscribe(_: &mut Hub, _: Shared<Self>) {}
         }
         impl Drop for X {
             fn drop(&mut self) {
@@ -584,14 +626,20 @@ mod tests {
         let buffer = Buffer::default();
         let mut hub = Hub::default().log(slog::Logger::root(buffer.clone().fuse(), slog::o!()));
 
+        hub! {
+            XHub: Hub {
+            } subscribe X {
+                event,
+            }
+        }
         struct X;
         impl EventHandler for X {}
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = ();
-            fn build(_: Hub, _: Self::Input) -> Self {
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
             }
-            fn subscribe(_: &Hub, _: Shared<Self>) {}
         }
 
         hub.subscribe::<X>(());
@@ -599,7 +647,7 @@ mod tests {
 
         assert_eq!(
             *buffer.string.lock().unwrap(),
-            "Object constructed, listens={}, emissions={}"
+            "Object constructed, listens={\"event\"}, emissions={}"
         );
     }
 
@@ -615,19 +663,30 @@ mod tests {
             }
         }
 
+        hub! {
+            XHub: Hub {
+            } subscribe X {
+                event,
+            }
+        }
+
+        hub! {
+            YHub: Hub {
+            } subscribe Y {
+                event,
+            }
+        }
         struct X;
         impl EventHandler for X {
             fn remove_me(&self) -> bool {
                 true
             }
         }
-        impl Subscriber<Hub> for X {
+        impl Subscriber for X {
+            type Hub = XHub;
             type Input = ();
-            fn build(_: Hub, _: Self::Input) -> Self {
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event.subscribe(shared);
             }
         }
 
@@ -637,13 +696,11 @@ mod tests {
                 false
             }
         }
-        impl Subscriber<Hub> for Y {
+        impl Subscriber for Y {
+            type Hub = YHub;
             type Input = ();
-            fn build(_: Hub, _: Self::Input) -> Self {
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
                 Self
-            }
-            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-                hub.event.subscribe(shared);
             }
         }
 
@@ -674,5 +731,70 @@ mod tests {
             count += 1;
         });
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn derive_into() {
+        pub trait EventHandler {}
+        hub! {
+            Hub {
+                event1: dyn EventHandler,
+                event2: dyn EventHandler,
+            }
+        }
+
+        hub! {
+            Sub: Hub {
+                event1: dyn EventHandler,
+            } subscribe X {
+                event2,
+            }
+        }
+
+        hub! {
+            Gub: Sub {
+            } subscribe Y {
+                event1,
+            }
+        }
+
+        struct Y;
+        impl EventHandler for Y {}
+        impl Subscriber for Y {
+            type Hub = Gub;
+            type Input = ();
+
+            fn build(_: Self::Hub, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut hub = Hub::default();
+
+        struct X;
+        impl EventHandler for X {}
+
+        impl Subscriber for X {
+            type Hub = Sub;
+            type Input = ();
+
+            fn build(mut hub: Self::Hub, _: Self::Input) -> Self {
+                hub.subscribe::<Y>(());
+                let mut count = 0;
+                hub.event1.emit(|_| {
+                    println!("{}: {}", "Emitting the best", count);
+                    count += 1;
+                });
+                Self
+            }
+        }
+
+        hub.subscribe::<X>(());
+        hub.subscribe::<X>(());
+
+        hub.event2.emit(|_| {
+            println!("{}", "HEmlo");
+        });
+        println!("{}", "HEmlo2");
     }
 }

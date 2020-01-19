@@ -1,4 +1,4 @@
-use revent::{hub, Shared, Subscriber};
+use revent::{hub, Subscriber};
 
 // 1. Define your events using traits.
 //
@@ -28,7 +28,18 @@ fn main() {
     // 3. Construct a event hub.
     let mut hub = Hub::new();
 
-    // 4. Add instances of the hub traits.
+    // 4. Create the derivative hub for the subscriber.
+    //
+    // This specifies which channels will be subscribed, which hubs can actually construct this
+    // object, and which channels may be emitted into.
+    hub! {
+        HandlerHub: Hub {
+        } subscribe MyEventHandler {
+            basic,
+        }
+    }
+
+    // 5. Add instances of the hub traits.
     //
     // We implement the trait for a type so it can be inserted into a channel in the hub.
     struct MyEventHandler;
@@ -38,32 +49,28 @@ fn main() {
         }
     }
 
-    // 5. Implement `Subscriber` for the event handler.
+    // 6. Implement `Subscriber` for the event handler.
     //
     // Subscriber informs the hub how to build and subscribe the type to other channels. It also
     // ensures that we don't have any recursive subscriptions.
-    impl Subscriber<Hub> for MyEventHandler {
+    impl Subscriber for MyEventHandler {
+        type Hub = HandlerHub;
         type Input = ();
-        fn build(_: Hub, _: Self::Input) -> Self {
+        fn build(_: Self::Hub, _: Self::Input) -> Self {
             // We just construct the struct, no need to do anything special here in
             // this specific example.
             MyEventHandler
         }
-
-        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-            // Here we inform which channels we'd like to subscribe to.
-            hub.basic.subscribe(shared);
-        }
     }
 
-    // 6. Construct an instance inside the hub.
+    // 7. Construct an instance inside the hub.
     //
     // We must construct an instance inside the hub because we may want to copy the `hub` inside
     // the object itself so it can emit further signals. This hub copy has only a selected amount
     // of signals enabled so we can avoid recursive event signals.
     hub.subscribe::<MyEventHandler>(());
 
-    // 7. Emit events.
+    // 8. Emit events.
     //
     // We simply call `emit` on the topic we'd like to emit an event to. We then give a lambda that
     // takes a reference to the `dyn Trait` for that signal. This allows us to use the return type
@@ -73,4 +80,12 @@ fn main() {
     hub.basic.emit(|x| {
         x.event();
     });
+
+    // 9. Remove the subscriber.
+    //
+    // To showcase how we can remove subscribers, returning true from the closure removes the
+    // subscriber. Returning false leaves it be.
+    // Removing a subscriber like this only removes it from the given channel. A subscriber may
+    // have subscribed to multiple event channels.
+    hub.basic.remove(|_| true);
 }

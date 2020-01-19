@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use revent::{hub, Shared, Subscriber};
+use revent::{hub, Subscriber};
 
 pub trait Signal {
     fn signal(&mut self);
@@ -9,19 +9,24 @@ struct Handler;
 impl Signal for Handler {
     fn signal(&mut self) {}
 }
-impl Subscriber<Hub> for Handler {
+impl Subscriber for Handler {
+    type Hub = HandlerHub;
     type Input = ();
-    fn build(_: Hub, _: Self::Input) -> Self {
+    fn build(_: Self::Hub, _: Self::Input) -> Self {
         Self
-    }
-    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
-        hub.signal.subscribe(shared);
     }
 }
 
 hub! {
     Hub {
         signal: dyn Signal,
+    }
+}
+
+hub! {
+    HandlerHub: Hub {
+    } subscribe Handler {
+        signal,
     }
 }
 
