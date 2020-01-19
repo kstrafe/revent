@@ -26,7 +26,7 @@ hub! {
 
 fn main() {
     // 3. Construct a event hub.
-    let hub = Hub::new();
+    let mut hub = Hub::new();
 
     // 4. Add instances of the hub traits.
     //
@@ -50,7 +50,7 @@ fn main() {
             MyEventHandler
         }
 
-        fn subscribe(hub: &Hub, shared: Shared<Self>) {
+        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
             // Here we inform which channels we'd like to subscribe to.
             hub.basic.subscribe(shared);
         }

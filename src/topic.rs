@@ -17,7 +17,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     ///
     /// The `caller` variable is applied once to every single subscriber of this topic. Use this function to call the various methods on the subscribers.
     /// Subscribers are applied to `caller` in arbitrary order.
-    pub fn emit(&self, mut caller: impl FnMut(&mut T)) {
+    pub fn emit(&mut self, mut caller: impl FnMut(&mut T)) {
         self.manager.borrow_mut().emitting(self.name);
         if !self.active {
             panic!("Topic is not active (emit): {}", self.name);
@@ -33,7 +33,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     /// Subscribe to this channel. Used only in
     /// [Subscriber::subscribe](crate::Subscriber::subscribe) to make a
     /// [Subscriber](crate::Subscriber) subscribe to hub topics.
-    pub fn subscribe(&self, shared: Shared<T>) {
+    pub fn subscribe(&mut self, shared: Shared<T>) {
         self.manager.borrow_mut().subscribe_channel(self.name);
         unsafe { &mut *self.subscribers.get() }.push(shared);
     }
@@ -42,7 +42,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     ///
     /// If the closure returns true, then the element is removed. If the closure returns false, the
     /// element will remain in the topic.
-    pub fn filter(&self, mut caller: impl FnMut(&mut T) -> bool) {
+    pub fn filter(&mut self, mut caller: impl FnMut(&mut T) -> bool) {
         self.manager.borrow_mut().emitting(self.name);
         if !self.active {
             panic!("Topic is not active (filter): {}", self.name);

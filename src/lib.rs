@@ -28,7 +28,7 @@
 //! }
 //!
 //! // Construct a hub object.
-//! let hub = Hub::default();
+//! let mut hub = Hub::default();
 //!
 //! // Implement a subscriber to some event.
 //! struct X;
@@ -42,7 +42,7 @@
 //!     fn build(_: Hub, input: Self::Input) -> Self {
 //!         Self
 //!     }
-//!     fn subscribe(hub: &Hub, shared: Shared<Self>) {
+//!     fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
 //!         hub.event.subscribe(shared);
 //!     }
 //! }
@@ -92,9 +92,9 @@ pub use topic::Topic;
 ///     }
 /// }
 ///
-/// let my_hub = MyHub::default();
+/// let mut my_hub = MyHub::default();
 /// // or
-/// let my_hub = MyHub::new();
+/// let mut my_hub = MyHub::new();
 ///
 /// my_hub.channel_name1.emit(|_| {
 ///     // Do something with each subscriber of channel_name1.
@@ -144,7 +144,7 @@ macro_rules! hub {
             }
 
             /// Insert a subscriber into the hub.
-            pub fn subscribe<T: $crate::Subscriber<Self>>(&self, input: T::Input) {
+            pub fn subscribe<T: $crate::Subscriber<Self>>(&mut self, input: T::Input) {
                 self.manager().borrow_mut().begin_construction();
                 let hub = self.clone_deactivate();
                 let shared = $crate::Shared::new(T::build(hub, input));
@@ -189,7 +189,7 @@ where
     ///
     /// This function wraps the self object inside an opaque wrapper which can be used on
     /// [Topic::subscribe].
-    fn subscribe(hub: &T, shared: Shared<Self>);
+    fn subscribe(hub: &mut T, shared: Shared<Self>);
 }
 
 #[cfg(test)]
@@ -207,7 +207,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X;
         impl EventHandler for X {}
@@ -216,7 +216,7 @@ mod tests {
             fn build(_: Hub, _: Self::Input) -> Self {
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event.subscribe(shared);
             }
         }
@@ -244,7 +244,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X {
             hub: Hub,
@@ -259,7 +259,7 @@ mod tests {
             fn build(hub: Hub, _: Self::Input) -> Self {
                 Self { hub }
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event1.subscribe(shared);
             }
         }
@@ -282,7 +282,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X;
         impl EventHandler for X {}
@@ -292,7 +292,7 @@ mod tests {
                 hub.event.activate();
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event.subscribe(shared);
             }
         }
@@ -312,7 +312,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X;
         impl EventHandler for X {}
@@ -322,7 +322,7 @@ mod tests {
                 hub.event1.activate();
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event2.subscribe(shared);
             }
         }
@@ -335,7 +335,7 @@ mod tests {
                 hub.event2.activate();
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event1.subscribe(shared);
             }
         }
@@ -357,7 +357,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X {
             hub: Hub,
@@ -377,7 +377,7 @@ mod tests {
                 hub.event2.activate();
                 Self { hub, called }
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event1.subscribe(shared);
             }
         }
@@ -395,7 +395,7 @@ mod tests {
             fn build(_: Hub, called: Self::Input) -> Self {
                 Self { called }
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event1.subscribe(shared.clone());
                 hub.event2.subscribe(shared);
             }
@@ -431,7 +431,7 @@ mod tests {
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         struct X {
             dropped: Rc<Cell<bool>>,
@@ -442,7 +442,7 @@ mod tests {
             fn build(_: Hub, input: Self::Input) -> Self {
                 Self { dropped: input }
             }
-            fn subscribe(_: &Hub, _: Shared<Self>) {}
+            fn subscribe(_: &mut Hub, _: Shared<Self>) {}
         }
         impl Drop for X {
             fn drop(&mut self) {
@@ -582,7 +582,7 @@ mod tests {
         }
 
         let buffer = Buffer::default();
-        let hub = Hub::default().log(slog::Logger::root(buffer.clone().fuse(), slog::o!()));
+        let mut hub = Hub::default().log(slog::Logger::root(buffer.clone().fuse(), slog::o!()));
 
         struct X;
         impl EventHandler for X {}
@@ -626,7 +626,7 @@ mod tests {
             fn build(_: Hub, _: Self::Input) -> Self {
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event.subscribe(shared);
             }
         }
@@ -642,12 +642,12 @@ mod tests {
             fn build(_: Hub, _: Self::Input) -> Self {
                 Self
             }
-            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+            fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
                 hub.event.subscribe(shared);
             }
         }
 
-        let hub = Hub::default();
+        let mut hub = Hub::default();
 
         hub.subscribe::<X>(());
         hub.subscribe::<X>(());

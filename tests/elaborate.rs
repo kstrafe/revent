@@ -112,7 +112,7 @@ hub! {
     expected = "Recursion detected: [\"x1\", \"x100\", \"x99\", \"x98\", \"x97\", \"x96\", \"x95\", \"x94\", \"x93\", \"x92\", \"x91\", \"x90\", \"x89\", \"x88\", \"x87\", \"x86\", \"x85\", \"x84\", \"x83\", \"x82\", \"x81\", \"x80\", \"x79\", \"x78\", \"x77\", \"x76\", \"x75\", \"x74\", \"x73\", \"x72\", \"x71\", \"x70\", \"x69\", \"x68\", \"x67\", \"x66\", \"x65\", \"x64\", \"x63\", \"x62\", \"x61\", \"x60\", \"x59\", \"x58\", \"x57\", \"x56\", \"x55\", \"x54\", \"x53\", \"x52\", \"x51\", \"x50\", \"x49\", \"x48\", \"x47\", \"x46\", \"x45\", \"x44\", \"x43\", \"x42\", \"x41\", \"x40\", \"x39\", \"x38\", \"x37\", \"x36\", \"x35\", \"x34\", \"x33\", \"x32\", \"x31\", \"x30\", \"x29\", \"x28\", \"x27\", \"x26\", \"x25\", \"x24\", \"x23\", \"x22\", \"x21\", \"x20\", \"x19\", \"x18\", \"x17\", \"x16\", \"x15\", \"x14\", \"x13\", \"x12\", \"x11\", \"x10\", \"x9\", \"x8\", \"x7\", \"x6\", \"x5\", \"x4\", \"x3\", \"x2\"]"
 )]
 fn elaborate() {
-    let hub = Hub::new();
+    let mut hub = Hub::new();
 
     hub.subscribe::<X1>(());
     hub.subscribe::<X2>(());
@@ -218,7 +218,7 @@ fn elaborate() {
 
 #[test]
 fn elaborate_no_cycle() {
-    let hub = Hub::new();
+    let mut hub = Hub::new();
 
     // hub.subscribe::<X1>(());
     hub.subscribe::<X2>(());
@@ -330,7 +330,7 @@ impl Subscriber<Hub> for X1 {
         hub.x100.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x1.subscribe(shared);
     }
 }
@@ -342,7 +342,7 @@ impl Subscriber<Hub> for X2 {
         hub.x1.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x2.subscribe(shared);
     }
 }
@@ -354,7 +354,7 @@ impl Subscriber<Hub> for X3 {
         hub.x2.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x3.subscribe(shared);
     }
 }
@@ -366,7 +366,7 @@ impl Subscriber<Hub> for X4 {
         hub.x3.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x4.subscribe(shared);
     }
 }
@@ -378,7 +378,7 @@ impl Subscriber<Hub> for X5 {
         hub.x4.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x5.subscribe(shared);
     }
 }
@@ -390,7 +390,7 @@ impl Subscriber<Hub> for X6 {
         hub.x5.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x6.subscribe(shared);
     }
 }
@@ -402,7 +402,7 @@ impl Subscriber<Hub> for X7 {
         hub.x6.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x7.subscribe(shared);
     }
 }
@@ -414,7 +414,7 @@ impl Subscriber<Hub> for X8 {
         hub.x7.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x8.subscribe(shared);
     }
 }
@@ -426,7 +426,7 @@ impl Subscriber<Hub> for X9 {
         hub.x8.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x9.subscribe(shared);
     }
 }
@@ -438,7 +438,7 @@ impl Subscriber<Hub> for X10 {
         hub.x9.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x10.subscribe(shared);
     }
 }
@@ -450,7 +450,7 @@ impl Subscriber<Hub> for X11 {
         hub.x10.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x11.subscribe(shared);
     }
 }
@@ -462,7 +462,7 @@ impl Subscriber<Hub> for X12 {
         hub.x11.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x12.subscribe(shared);
     }
 }
@@ -474,7 +474,7 @@ impl Subscriber<Hub> for X13 {
         hub.x12.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x13.subscribe(shared);
     }
 }
@@ -486,7 +486,7 @@ impl Subscriber<Hub> for X14 {
         hub.x13.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x14.subscribe(shared);
     }
 }
@@ -498,7 +498,7 @@ impl Subscriber<Hub> for X15 {
         hub.x14.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x15.subscribe(shared);
     }
 }
@@ -510,7 +510,7 @@ impl Subscriber<Hub> for X16 {
         hub.x15.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x16.subscribe(shared);
     }
 }
@@ -522,7 +522,7 @@ impl Subscriber<Hub> for X17 {
         hub.x16.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x17.subscribe(shared);
     }
 }
@@ -534,7 +534,7 @@ impl Subscriber<Hub> for X18 {
         hub.x17.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x18.subscribe(shared);
     }
 }
@@ -546,7 +546,7 @@ impl Subscriber<Hub> for X19 {
         hub.x18.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x19.subscribe(shared);
     }
 }
@@ -558,7 +558,7 @@ impl Subscriber<Hub> for X20 {
         hub.x19.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x20.subscribe(shared);
     }
 }
@@ -570,7 +570,7 @@ impl Subscriber<Hub> for X21 {
         hub.x20.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x21.subscribe(shared);
     }
 }
@@ -582,7 +582,7 @@ impl Subscriber<Hub> for X22 {
         hub.x21.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x22.subscribe(shared);
     }
 }
@@ -594,7 +594,7 @@ impl Subscriber<Hub> for X23 {
         hub.x22.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x23.subscribe(shared);
     }
 }
@@ -606,7 +606,7 @@ impl Subscriber<Hub> for X24 {
         hub.x23.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x24.subscribe(shared);
     }
 }
@@ -618,7 +618,7 @@ impl Subscriber<Hub> for X25 {
         hub.x24.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x25.subscribe(shared);
     }
 }
@@ -630,7 +630,7 @@ impl Subscriber<Hub> for X26 {
         hub.x25.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x26.subscribe(shared);
     }
 }
@@ -642,7 +642,7 @@ impl Subscriber<Hub> for X27 {
         hub.x26.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x27.subscribe(shared);
     }
 }
@@ -654,7 +654,7 @@ impl Subscriber<Hub> for X28 {
         hub.x27.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x28.subscribe(shared);
     }
 }
@@ -666,7 +666,7 @@ impl Subscriber<Hub> for X29 {
         hub.x28.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x29.subscribe(shared);
     }
 }
@@ -678,7 +678,7 @@ impl Subscriber<Hub> for X30 {
         hub.x29.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x30.subscribe(shared);
     }
 }
@@ -690,7 +690,7 @@ impl Subscriber<Hub> for X31 {
         hub.x30.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x31.subscribe(shared);
     }
 }
@@ -702,7 +702,7 @@ impl Subscriber<Hub> for X32 {
         hub.x31.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x32.subscribe(shared);
     }
 }
@@ -714,7 +714,7 @@ impl Subscriber<Hub> for X33 {
         hub.x32.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x33.subscribe(shared);
     }
 }
@@ -726,7 +726,7 @@ impl Subscriber<Hub> for X34 {
         hub.x33.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x34.subscribe(shared);
     }
 }
@@ -738,7 +738,7 @@ impl Subscriber<Hub> for X35 {
         hub.x34.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x35.subscribe(shared);
     }
 }
@@ -750,7 +750,7 @@ impl Subscriber<Hub> for X36 {
         hub.x35.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x36.subscribe(shared);
     }
 }
@@ -762,7 +762,7 @@ impl Subscriber<Hub> for X37 {
         hub.x36.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x37.subscribe(shared);
     }
 }
@@ -774,7 +774,7 @@ impl Subscriber<Hub> for X38 {
         hub.x37.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x38.subscribe(shared);
     }
 }
@@ -786,7 +786,7 @@ impl Subscriber<Hub> for X39 {
         hub.x38.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x39.subscribe(shared);
     }
 }
@@ -798,7 +798,7 @@ impl Subscriber<Hub> for X40 {
         hub.x39.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x40.subscribe(shared);
     }
 }
@@ -810,7 +810,7 @@ impl Subscriber<Hub> for X41 {
         hub.x40.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x41.subscribe(shared);
     }
 }
@@ -822,7 +822,7 @@ impl Subscriber<Hub> for X42 {
         hub.x41.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x42.subscribe(shared);
     }
 }
@@ -834,7 +834,7 @@ impl Subscriber<Hub> for X43 {
         hub.x42.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x43.subscribe(shared);
     }
 }
@@ -846,7 +846,7 @@ impl Subscriber<Hub> for X44 {
         hub.x43.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x44.subscribe(shared);
     }
 }
@@ -858,7 +858,7 @@ impl Subscriber<Hub> for X45 {
         hub.x44.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x45.subscribe(shared);
     }
 }
@@ -870,7 +870,7 @@ impl Subscriber<Hub> for X46 {
         hub.x45.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x46.subscribe(shared);
     }
 }
@@ -882,7 +882,7 @@ impl Subscriber<Hub> for X47 {
         hub.x46.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x47.subscribe(shared);
     }
 }
@@ -894,7 +894,7 @@ impl Subscriber<Hub> for X48 {
         hub.x47.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x48.subscribe(shared);
     }
 }
@@ -906,7 +906,7 @@ impl Subscriber<Hub> for X49 {
         hub.x48.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x49.subscribe(shared);
     }
 }
@@ -918,7 +918,7 @@ impl Subscriber<Hub> for X50 {
         hub.x49.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x50.subscribe(shared);
     }
 }
@@ -930,7 +930,7 @@ impl Subscriber<Hub> for X51 {
         hub.x50.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x51.subscribe(shared);
     }
 }
@@ -942,7 +942,7 @@ impl Subscriber<Hub> for X52 {
         hub.x51.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x52.subscribe(shared);
     }
 }
@@ -954,7 +954,7 @@ impl Subscriber<Hub> for X53 {
         hub.x52.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x53.subscribe(shared);
     }
 }
@@ -966,7 +966,7 @@ impl Subscriber<Hub> for X54 {
         hub.x53.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x54.subscribe(shared);
     }
 }
@@ -978,7 +978,7 @@ impl Subscriber<Hub> for X55 {
         hub.x54.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x55.subscribe(shared);
     }
 }
@@ -990,7 +990,7 @@ impl Subscriber<Hub> for X56 {
         hub.x55.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x56.subscribe(shared);
     }
 }
@@ -1002,7 +1002,7 @@ impl Subscriber<Hub> for X57 {
         hub.x56.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x57.subscribe(shared);
     }
 }
@@ -1014,7 +1014,7 @@ impl Subscriber<Hub> for X58 {
         hub.x57.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x58.subscribe(shared);
     }
 }
@@ -1026,7 +1026,7 @@ impl Subscriber<Hub> for X59 {
         hub.x58.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x59.subscribe(shared);
     }
 }
@@ -1038,7 +1038,7 @@ impl Subscriber<Hub> for X60 {
         hub.x59.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x60.subscribe(shared);
     }
 }
@@ -1050,7 +1050,7 @@ impl Subscriber<Hub> for X61 {
         hub.x60.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x61.subscribe(shared);
     }
 }
@@ -1062,7 +1062,7 @@ impl Subscriber<Hub> for X62 {
         hub.x61.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x62.subscribe(shared);
     }
 }
@@ -1074,7 +1074,7 @@ impl Subscriber<Hub> for X63 {
         hub.x62.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x63.subscribe(shared);
     }
 }
@@ -1086,7 +1086,7 @@ impl Subscriber<Hub> for X64 {
         hub.x63.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x64.subscribe(shared);
     }
 }
@@ -1098,7 +1098,7 @@ impl Subscriber<Hub> for X65 {
         hub.x64.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x65.subscribe(shared);
     }
 }
@@ -1110,7 +1110,7 @@ impl Subscriber<Hub> for X66 {
         hub.x65.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x66.subscribe(shared);
     }
 }
@@ -1122,7 +1122,7 @@ impl Subscriber<Hub> for X67 {
         hub.x66.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x67.subscribe(shared);
     }
 }
@@ -1134,7 +1134,7 @@ impl Subscriber<Hub> for X68 {
         hub.x67.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x68.subscribe(shared);
     }
 }
@@ -1146,7 +1146,7 @@ impl Subscriber<Hub> for X69 {
         hub.x68.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x69.subscribe(shared);
     }
 }
@@ -1158,7 +1158,7 @@ impl Subscriber<Hub> for X70 {
         hub.x69.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x70.subscribe(shared);
     }
 }
@@ -1170,7 +1170,7 @@ impl Subscriber<Hub> for X71 {
         hub.x70.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x71.subscribe(shared);
     }
 }
@@ -1182,7 +1182,7 @@ impl Subscriber<Hub> for X72 {
         hub.x71.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x72.subscribe(shared);
     }
 }
@@ -1194,7 +1194,7 @@ impl Subscriber<Hub> for X73 {
         hub.x72.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x73.subscribe(shared);
     }
 }
@@ -1206,7 +1206,7 @@ impl Subscriber<Hub> for X74 {
         hub.x73.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x74.subscribe(shared);
     }
 }
@@ -1218,7 +1218,7 @@ impl Subscriber<Hub> for X75 {
         hub.x74.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x75.subscribe(shared);
     }
 }
@@ -1230,7 +1230,7 @@ impl Subscriber<Hub> for X76 {
         hub.x75.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x76.subscribe(shared);
     }
 }
@@ -1242,7 +1242,7 @@ impl Subscriber<Hub> for X77 {
         hub.x76.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x77.subscribe(shared);
     }
 }
@@ -1254,7 +1254,7 @@ impl Subscriber<Hub> for X78 {
         hub.x77.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x78.subscribe(shared);
     }
 }
@@ -1266,7 +1266,7 @@ impl Subscriber<Hub> for X79 {
         hub.x78.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x79.subscribe(shared);
     }
 }
@@ -1278,7 +1278,7 @@ impl Subscriber<Hub> for X80 {
         hub.x79.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x80.subscribe(shared);
     }
 }
@@ -1290,7 +1290,7 @@ impl Subscriber<Hub> for X81 {
         hub.x80.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x81.subscribe(shared);
     }
 }
@@ -1302,7 +1302,7 @@ impl Subscriber<Hub> for X82 {
         hub.x81.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x82.subscribe(shared);
     }
 }
@@ -1314,7 +1314,7 @@ impl Subscriber<Hub> for X83 {
         hub.x82.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x83.subscribe(shared);
     }
 }
@@ -1326,7 +1326,7 @@ impl Subscriber<Hub> for X84 {
         hub.x83.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x84.subscribe(shared);
     }
 }
@@ -1338,7 +1338,7 @@ impl Subscriber<Hub> for X85 {
         hub.x84.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x85.subscribe(shared);
     }
 }
@@ -1350,7 +1350,7 @@ impl Subscriber<Hub> for X86 {
         hub.x85.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x86.subscribe(shared);
     }
 }
@@ -1362,7 +1362,7 @@ impl Subscriber<Hub> for X87 {
         hub.x86.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x87.subscribe(shared);
     }
 }
@@ -1374,7 +1374,7 @@ impl Subscriber<Hub> for X88 {
         hub.x87.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x88.subscribe(shared);
     }
 }
@@ -1386,7 +1386,7 @@ impl Subscriber<Hub> for X89 {
         hub.x88.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x89.subscribe(shared);
     }
 }
@@ -1398,7 +1398,7 @@ impl Subscriber<Hub> for X90 {
         hub.x89.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x90.subscribe(shared);
     }
 }
@@ -1410,7 +1410,7 @@ impl Subscriber<Hub> for X91 {
         hub.x90.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x91.subscribe(shared);
     }
 }
@@ -1422,7 +1422,7 @@ impl Subscriber<Hub> for X92 {
         hub.x91.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x92.subscribe(shared);
     }
 }
@@ -1434,7 +1434,7 @@ impl Subscriber<Hub> for X93 {
         hub.x92.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x93.subscribe(shared);
     }
 }
@@ -1446,7 +1446,7 @@ impl Subscriber<Hub> for X94 {
         hub.x93.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x94.subscribe(shared);
     }
 }
@@ -1458,7 +1458,7 @@ impl Subscriber<Hub> for X95 {
         hub.x94.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x95.subscribe(shared);
     }
 }
@@ -1470,7 +1470,7 @@ impl Subscriber<Hub> for X96 {
         hub.x95.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x96.subscribe(shared);
     }
 }
@@ -1482,7 +1482,7 @@ impl Subscriber<Hub> for X97 {
         hub.x96.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x97.subscribe(shared);
     }
 }
@@ -1494,7 +1494,7 @@ impl Subscriber<Hub> for X98 {
         hub.x97.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x98.subscribe(shared);
     }
 }
@@ -1506,7 +1506,7 @@ impl Subscriber<Hub> for X99 {
         hub.x98.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x99.subscribe(shared);
     }
 }
@@ -1518,7 +1518,7 @@ impl Subscriber<Hub> for X100 {
         hub.x99.activate();
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.x100.subscribe(shared);
     }
 }

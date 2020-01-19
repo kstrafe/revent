@@ -19,7 +19,7 @@ hub! {
 }
 
 fn main() {
-    let hub = Hub::new();
+    let mut hub = Hub::new();
 
     // Make the handler for `event1`.
     struct MyEvent1Handler {
@@ -45,7 +45,7 @@ fn main() {
             Self { hub }
         }
 
-        fn subscribe(hub: &Hub, shared: Shared<Self>) {
+        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
             hub.event1.subscribe(shared);
         }
     }
@@ -62,7 +62,7 @@ fn main() {
         fn build(_: Hub, _: Self::Input) -> Self {
             MyEvent2Handler
         }
-        fn subscribe(hub: &Hub, shared: Shared<Self>) {
+        fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
             hub.event2.subscribe(shared);
         }
     }

@@ -14,7 +14,7 @@ impl Subscriber<Hub> for Handler {
     fn build(_: Hub, _: Self::Input) -> Self {
         Self
     }
-    fn subscribe(hub: &Hub, shared: Shared<Self>) {
+    fn subscribe(hub: &mut Hub, shared: Shared<Self>) {
         hub.signal.subscribe(shared);
     }
 }
@@ -27,43 +27,43 @@ hub! {
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("empty signal handler", |b| {
-        let hub = Hub::default();
+        let mut hub = Hub::default();
         b.iter(|| {
-            black_box(&hub).signal.emit(|x| {
+            black_box(&mut hub).signal.emit(|x| {
                 x.signal();
             });
         });
     });
 
     c.bench_function("single signal handler", |b| {
-        let hub = Hub::default();
+        let mut hub = Hub::default();
         hub.subscribe::<Handler>(());
         b.iter(|| {
-            black_box(&hub).signal.emit(|x| {
+            black_box(&mut hub).signal.emit(|x| {
                 x.signal();
             });
         });
     });
 
     c.bench_function("many signal handler", |b| {
-        let hub = Hub::default();
+        let mut hub = Hub::default();
         for _ in 0..1000 {
             hub.subscribe::<Handler>(());
         }
         b.iter(|| {
-            black_box(&hub).signal.emit(|x| {
+            black_box(&mut hub).signal.emit(|x| {
                 x.signal();
             });
         });
     });
 
     c.bench_function("many remove", |b| {
-        let hub = Hub::default();
+        let mut hub = Hub::default();
         b.iter(|| {
             for _ in 0..1000 {
                 hub.subscribe::<Handler>(());
             }
-            black_box(&hub).signal.filter(|_| true);
+            black_box(&mut hub).signal.filter(|_| true);
         });
     });
 
@@ -78,7 +78,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("adding subscribers", |b| {
-        let hub = Hub::default();
+        let mut hub = Hub::default();
         b.iter(|| {
             hub.subscribe::<Handler>(());
         });
