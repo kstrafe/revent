@@ -31,6 +31,15 @@ impl Default for Manager {
 }
 
 impl Manager {
+    pub fn graphviz(&self) -> String {
+        let mut accum = "digraph Hub {\n".to_string();
+        for (k, v) in &self.subscriptions {
+            accum += &format!("\t{:?} -> {:?};\n", k, v);
+        }
+        accum += "}";
+        accum
+    }
+
     pub fn begin_construction(&mut self) {
         self.construction = true;
     }

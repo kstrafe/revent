@@ -5,9 +5,7 @@ use std::{cell::UnsafeCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
 /// Used in
 /// [Topic::subscribe](crate::Topic::subscribe) and provided in
 /// [Subscriber::subscribe](crate::Subscriber::subscribe).
-pub struct Shared<T: ?Sized>(
-    pub(crate) Rc<UnsafeCell<T>>,
-);
+pub struct Shared<T: ?Sized>(pub(crate) Rc<UnsafeCell<T>>);
 
 impl<T> Shared<T> {
     #[doc(hidden)]

@@ -152,6 +152,12 @@ macro_rules! hub {
                 self.manager().borrow_mut().end_construction();
             }
 
+            /// Generate a graphviz (dot) style graph.
+            #[allow(dead_code)]
+            pub fn graph(&self) -> String {
+                self.manager().borrow_mut().graphviz()
+            }
+
             #[doc(hidden)]
             fn clone_deactivate(&self) -> Self {
                 Self {
@@ -225,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Topic is not active: event2")]
+    #[should_panic(expected = "Topic is not active (emit): event2")]
     fn emit_on_non_activated_channel() {
         pub trait EventHandler {
             fn event(&mut self);
@@ -595,5 +601,78 @@ mod tests {
             *buffer.string.lock().unwrap(),
             "Object constructed, listens={}, emissions={}"
         );
+    }
+
+    #[test]
+    fn removing_an_element() {
+        pub trait EventHandler {
+            fn remove_me(&self) -> bool;
+        }
+
+        hub! {
+            Hub {
+                event: dyn EventHandler,
+            }
+        }
+
+        struct X;
+        impl EventHandler for X {
+            fn remove_me(&self) -> bool {
+                true
+            }
+        }
+        impl Subscriber<Hub> for X {
+            type Input = ();
+            fn build(_: Hub, _: Self::Input) -> Self {
+                Self
+            }
+            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+                hub.event.subscribe(shared);
+            }
+        }
+
+        struct Y;
+        impl EventHandler for Y {
+            fn remove_me(&self) -> bool {
+                false
+            }
+        }
+        impl Subscriber<Hub> for Y {
+            type Input = ();
+            fn build(_: Hub, _: Self::Input) -> Self {
+                Self
+            }
+            fn subscribe(hub: &Hub, shared: Shared<Self>) {
+                hub.event.subscribe(shared);
+            }
+        }
+
+        let hub = Hub::default();
+
+        hub.subscribe::<X>(());
+        hub.subscribe::<X>(());
+        hub.subscribe::<Y>(());
+
+        let mut count = 0;
+        hub.event.emit(|_| {
+            count += 1;
+        });
+        assert_eq!(count, 3);
+
+        hub.event.filter(|x| x.remove_me());
+
+        let mut count = 0;
+        hub.event.emit(|_| {
+            count += 1;
+        });
+        assert_eq!(count, 1);
+
+        hub.event.filter(|x| !x.remove_me());
+
+        let mut count = 0;
+        hub.event.emit(|_| {
+            count += 1;
+        });
+        assert_eq!(count, 0);
     }
 }

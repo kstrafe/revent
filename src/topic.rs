@@ -20,7 +20,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     pub fn emit(&self, mut caller: impl FnMut(&mut T)) {
         self.manager.borrow_mut().emitting(self.name);
         if !self.active {
-            panic!("Topic is not active: {}", self.name);
+            panic!("Topic is not active (emit): {}", self.name);
         }
         if self.manager.borrow_mut().construction {
             panic!("Can not emit while an object is under construction");
@@ -36,6 +36,22 @@ impl<T: 'static + ?Sized> Topic<T> {
     pub fn subscribe(&self, shared: Shared<T>) {
         self.manager.borrow_mut().subscribe_channel(self.name);
         unsafe { &mut *self.subscribers.get() }.push(shared);
+    }
+
+    /// Remove elements from a topic.
+    ///
+    /// If the closure returns true, then the element is removed. If the closure returns false, the
+    /// element will remain in the topic.
+    pub fn filter(&self, mut caller: impl FnMut(&mut T) -> bool) {
+        self.manager.borrow_mut().emitting(self.name);
+        if !self.active {
+            panic!("Topic is not active (filter): {}", self.name);
+        }
+        if self.manager.borrow_mut().construction {
+            panic!("Can not filter while an object is under construction");
+        }
+        unsafe { &mut *self.subscribers.get() }
+            .drain_filter(|subscriber| caller(unsafe { &mut *subscriber.0.get() }));
     }
 
     /// Activate this channel instance.

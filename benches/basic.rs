@@ -57,6 +57,26 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
     });
 
+    c.bench_function("many remove", |b| {
+        let hub = Hub::default();
+        b.iter(|| {
+            for _ in 0..1000 {
+                hub.subscribe::<Handler>(());
+            }
+            black_box(&hub).signal.filter(|_| true);
+        });
+    });
+
+    c.bench_function("many subscribe", |b| {
+        let mut hub = Hub::default();
+        b.iter(|| {
+            for _ in 0..1000 {
+                hub.subscribe::<Handler>(());
+            }
+            hub = Hub::default();
+        });
+    });
+
     c.bench_function("adding subscribers", |b| {
         let hub = Hub::default();
         b.iter(|| {
