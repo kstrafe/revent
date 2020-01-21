@@ -142,6 +142,10 @@ macro_rules! hub {
             ),*
         }
 
+        impl Drop for $hub {
+            fn drop(&mut self) {}
+        }
+
         impl ::std::default::Default for $hub {
             fn default() -> Self {
                 Self::new()
