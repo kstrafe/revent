@@ -4,6 +4,9 @@
 //! It does so by performing DAG traversals at initialization-time to ensure that no signal
 //! chains are able to form a loop.
 //!
+//! Because of this it can forgo mutable aliasing checks, such that emitting events is as fast and
+//! cheap as calling a list of trait objects.
+//!
 //! # What is an event broker? #
 //!
 //! An event broker is a bag of objects and a bunch of "signals". Each object decides which signals to listen to.
@@ -92,7 +95,9 @@ pub mod example;
 mod mng;
 mod shared;
 mod topic;
+#[doc(hidden)]
 pub use mng::Manager;
+#[doc(hidden)]
 pub use shared::Shared;
 pub use topic::Topic;
 
@@ -121,7 +126,7 @@ pub use topic::Topic;
 /// ```
 ///
 /// The macro generates a struct of `MyHub` containing all topics. [Topic]s are public members of
-/// the struct. In addition, [Default] is implemented as well as `new` and `subscribe`.
+/// the struct. See [ExampleHub](example::ExampleHub) for an example of a generated hub.
 #[macro_export]
 macro_rules! hub {
     ($hub:ident { $($channel:ident: $type:ty),*$(,)? }) => {
@@ -130,8 +135,7 @@ macro_rules! hub {
         /// Contains various topics which can be emitted into or subscribed to.
         pub struct $hub {
             // TODO: When gensyms are supported make this symbol a gensym.
-            #[doc(hidden)]
-            pub _revent_1_manager: $crate::Shared<$crate::Manager>,
+            _revent_1_manager: $crate::Shared<$crate::Manager>,
             $(
                 /// Channel for the given type of event handler.
                 pub $channel: $crate::Topic<$type>
@@ -149,7 +153,7 @@ macro_rules! hub {
             pub fn new() -> Self {
                 let mng = $crate::Shared::new($crate::Manager::default());
                 $(
-                    let $channel = $crate::Topic::new(stringify!($channel), &mng);
+                    let $channel = unsafe { $crate::Topic::new(stringify!($channel), &mng) };
                 )*
                 Self {
                     _revent_1_manager: mng,
@@ -166,6 +170,9 @@ macro_rules! hub {
             }
 
             /// Insert a subscriber into the hub.
+            ///
+            /// Requires the trait [Subscriber](crate::Subscriber) and `Selfscriber`. Selfscriber is implemented by
+            /// creating a derivative hub. See the `examples/` directory for usage.
             #[allow(dead_code)]
             pub fn subscribe<T: $crate::Subscriber + $crate::Selfscriber<Self>>(&mut self, input: T::Input)
                 where T::Hub: for<'a> ::std::convert::TryFrom<&'a Self, Error = ()>,
@@ -200,7 +207,7 @@ macro_rules! hub {
             $hub { $($channel: $type),* }
         }
 
-        hub! { subscriber $structure, $derives, $($subscription),* }
+        hub! { selfscriber $structure, $derives, $($subscription),* }
 
         impl ::std::convert::TryFrom<&$derives> for $hub {
             type Error = ();
@@ -223,7 +230,7 @@ macro_rules! hub {
             $hub: $($rest),* { $($channel: $type),* } subscribe $structure { $($subscription),* }
         }
 
-        hub! { subscriber $structure, $derives, $($subscription),* }
+        hub! { selfscriber $structure, $derives, $($subscription),* }
 
         impl ::std::convert::TryFrom<&$derives> for $hub {
             type Error = ();
@@ -240,13 +247,13 @@ macro_rules! hub {
         }
     };
 
-    (subscriber $structure:ident, $derivative:ty,) => {
+    (selfscriber $structure:ident, $derivative:ty,) => {
         impl $crate::Selfscriber<$derivative> for $structure {
             fn subscribe(_: &mut $derivative, _: $crate::Shared<Self>) {}
         }
     };
 
-    (subscriber $structure:ident, $derivative:ty, $($subscriptions:ident),*) => {
+    (selfscriber $structure:ident, $derivative:ty, $($subscriptions:ident),*) => {
         impl $crate::Selfscriber<$derivative> for $structure {
             fn subscribe(hub: &mut $derivative, shared: $crate::Shared<Self>) {
                 unsafe {
@@ -259,11 +266,7 @@ macro_rules! hub {
     };
 }
 
-/// Implements channel subscription for a given hub.
-///
-/// Automatically implemented for all hub dependencies by the [hub] macro. It is highly advised to
-/// use the macro instead of implementing this trait directly. This trait is public as an artifact
-/// of the macro requiring public access.
+#[doc(hidden)]
 pub trait Selfscriber<T> {
     /// Subscribe `Self` to various channels of a hub.
     fn subscribe(hub: &mut T, shared: Shared<Self>);
@@ -505,6 +508,65 @@ mod tests {
         assert_eq!(dropped.get(), false);
         hub.subscribe::<X>(dropped.clone());
         assert_eq!(dropped.get(), true);
+    }
+
+    #[test]
+    fn subscription_order_in_emit_and_remove() {
+        pub trait EventHandler {
+            fn get(&self) -> i32;
+        }
+
+        hub! {
+            Hub {
+                event: dyn EventHandler,
+            }
+        }
+
+        hub! {
+            XHub: Hub {
+            } subscribe X {
+            }
+        }
+
+        let mut hub = Hub::default();
+
+        struct X {
+            value: i32,
+        }
+        impl EventHandler for X {
+            fn get(&self) -> i32 {
+                self.value
+            }
+        }
+        impl Subscriber for X {
+            type Hub = XHub;
+            type Input = i32;
+            fn build(_: Self::Hub, input: Self::Input) -> Self {
+                Self { value: input }
+            }
+        }
+
+        for value in 0..100 {
+            hub.subscribe::<X>(value);
+        }
+
+        let mut count = 0;
+        hub.event.emit(|x| {
+            assert_eq!(count, x.get());
+            count += 1;
+        });
+
+        hub.event.remove(|x| x.get() == 30);
+
+        let mut count = 0;
+        hub.event.emit(|x| {
+            assert_eq!(count, x.get());
+            if count == 29 {
+                count += 2;
+            } else {
+                count += 1;
+            }
+        });
     }
 
     #[test]

@@ -1,9 +1,7 @@
 #![doc(hidden)]
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Manage all dependencies to ensure there are no recursive events.
 #[derive(Clone)]
-#[doc(hidden)]
 pub struct Manager {
     subscriptions: BTreeMap<&'static str, BTreeSet<&'static str>>,
 
@@ -42,9 +40,6 @@ impl Manager {
     }
 
     pub fn activate_channel(&mut self, name: &'static str) {
-        if !self.is_constructing() {
-            panic!("Activating a channel outside of construction context");
-        }
         self.emissions.last_mut().unwrap().insert(name);
     }
 
@@ -67,11 +62,6 @@ impl Manager {
         chkrec(&self.subscriptions);
         self.listens.pop();
         self.emissions.pop();
-    }
-
-    pub fn is_constructing(&self) -> bool {
-        debug_assert_eq!(self.emissions.len(), self.listens.len());
-        !self.emissions.is_empty()
     }
 
     #[cfg(feature = "slog")]

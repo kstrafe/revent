@@ -1,22 +1,27 @@
+#![doc(hidden)]
 use std::{cell::UnsafeCell, marker::Unsize, ops::CoerceUnsized, rc::Rc};
 
 /// An opaque struct containing a shared reference to a subscriber.
+///
+/// For internal use only.
 pub struct Shared<T: ?Sized>(pub(crate) Rc<UnsafeCell<T>>);
 
 impl<T> Shared<T> {
-    #[doc(hidden)]
+    /// Create a new shared object.
     pub fn new(item: T) -> Self {
         Self(Rc::new(UnsafeCell::new(item)))
     }
 
-    #[doc(hidden)]
+    /// Get the raw pointer value.
     pub fn get(&self) -> *mut T {
         self.0.get()
     }
-}
 
-impl<T> Clone for Shared<T> {
-    fn clone(&self) -> Self {
+    /// Clone this shared object.
+    ///
+    /// Only intended to be used by the [hub] macro. Please DO NOT use this function as it might be
+    /// removed or changed, or cause undefined behavior if used improperly.
+    pub unsafe fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }

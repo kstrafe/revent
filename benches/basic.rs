@@ -31,6 +31,14 @@ hub! {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
+    c.bench_function("empty static function", |b| {
+        #[inline(never)]
+        fn x() {}
+        b.iter(|| {
+            x();
+        });
+    });
+
     c.bench_function("empty signal handler", |b| {
         let mut hub = Hub::default();
         b.iter(|| {
@@ -47,6 +55,16 @@ fn criterion_benchmark(c: &mut Criterion) {
             black_box(&mut hub).signal.emit(|x| {
                 x.signal();
             });
+        });
+    });
+
+    c.bench_function("many static function", |b| {
+        #[inline(never)]
+        fn x() {}
+        b.iter(|| {
+            for _ in 0..1000 {
+                x();
+            }
         });
     });
 

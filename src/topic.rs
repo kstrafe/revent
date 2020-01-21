@@ -1,5 +1,4 @@
 use crate::{Manager, Shared};
-use std::{cell::RefCell, rc::Rc};
 
 /// An event channel for a certain type of [Subscriber](crate::Subscriber).
 pub struct Topic<T: 'static + ?Sized>(Shared<InternalTopic<T>>);
@@ -16,8 +15,11 @@ impl<T: 'static + ?Sized> Topic<T> {
     /// Emit an event into this topic to all subscribers.
     ///
     /// The `caller` variable is applied once to every single subscriber of this topic. Use this function to call the various methods on the subscribers.
-    /// Subscribers are applied to `caller` in arbitrary order.
-    pub fn emit(&mut self, mut caller: impl FnMut(&mut T)) {
+    /// Subscribers are applied to `caller` in the order they were subscribed.
+    pub fn emit<F>(&mut self, mut caller: F)
+    where
+        F: FnMut(&mut T),
+    {
         let internal = unsafe { &mut *(self.0).0.get() };
         unsafe { &mut *internal.manager.get() }.emitting(internal.name);
         for subscriber in internal.subscribers.iter() {
@@ -28,7 +30,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     /// Remove elements from a topic.
     ///
     /// If the closure returns true, then the element is removed. If the closure returns false, the
-    /// element will remain in the topic.
+    /// element will remain in the topic. Item ordering does not change.
     pub fn remove<F>(&mut self, mut caller: F)
     where
         F: FnMut(&mut T) -> bool,
@@ -41,7 +43,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     }
 
     #[doc(hidden)]
-    pub fn new(name: &'static str, manager: &Shared<Manager>) -> Self {
+    pub unsafe fn new(name: &'static str, manager: &Shared<Manager>) -> Self {
         Self(Shared::new(InternalTopic {
             manager: manager.clone(),
             name,
