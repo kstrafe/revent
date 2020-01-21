@@ -8,6 +8,11 @@ impl<T> Shared<T> {
     pub fn new(item: T) -> Self {
         Self(Rc::new(UnsafeCell::new(item)))
     }
+
+    #[doc(hidden)]
+    pub fn get(&self) -> *mut T {
+        self.0.get()
+    }
 }
 
 impl<T> Clone for Shared<T> {
@@ -22,3 +27,5 @@ where
     U: ?Sized,
 {
 }
+
+unsafe impl<T: Send> Send for Shared<T> {}

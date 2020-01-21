@@ -73,12 +73,14 @@
 //! });
 //! ```
 //!
+//! See the `examples` directory for more.
+//!
 //! # Logging #
 //!
 //! Use `feature = "slog"` to add a method `log` to the hub generated from the [hub] macro.
 //! This method sets a logger object.
 #![deny(
-    // missing_docs,
+    missing_docs,
     trivial_casts,
     trivial_numeric_casts,
     unused_import_braces,
@@ -129,14 +131,14 @@ macro_rules! hub {
         pub struct $hub {
             // TODO: When gensyms are supported make this symbol a gensym.
             #[doc(hidden)]
-            pub _manager: ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>>,
+            pub _manager: $crate::Shared<$crate::Manager>,
             $(
                 /// Channel for the given type of event handler.
                 pub $channel: $crate::Topic<$type>
             ),*
         }
 
-        impl Default for $hub {
+        impl ::std::default::Default for $hub {
             fn default() -> Self {
                 Self::new()
             }
@@ -145,7 +147,7 @@ macro_rules! hub {
         impl $hub {
             /// Create a new hub.
             pub fn new() -> Self {
-                let mng = ::std::rc::Rc::new(::std::cell::RefCell::new($crate::Manager::default()));
+                let mng = $crate::Shared::new($crate::Manager::default());
                 $(
                     let $channel = $crate::Topic::new(stringify!($channel), &mng);
                 )*
@@ -159,7 +161,7 @@ macro_rules! hub {
             #[allow(dead_code)]
             #[cfg(feature = "slog")]
             pub fn log(self, logger: slog::Logger) -> Self {
-                self._manager.borrow_mut().log = logger;
+                unsafe { &mut *self.manager().get() }.log = logger;
                 self
             }
 
@@ -168,24 +170,24 @@ macro_rules! hub {
             pub fn subscribe<T: $crate::Subscriber + $crate::Selfscriber<Self>>(&mut self, input: T::Input)
                 where T::Hub: for<'a> ::std::convert::TryFrom<&'a Self, Error = ()>,
             {
-                self.manager().borrow_mut().begin_construction();
+                unsafe { &mut *self.manager().get() }.begin_construction();
                 let hub: T::Hub = match ::std::convert::TryInto::try_into(&*self) {
                     Ok(hub) => hub,
                     Err(()) => panic!("Internal error: Unable to construct sub-hub."),
                 };
                 let shared = $crate::Shared::new(T::build(hub, input));
                 $crate::Selfscriber::subscribe(self, shared);
-                self.manager().borrow_mut().end_construction();
+                unsafe { &mut *self.manager().get() }.end_construction();
             }
 
             /// Generate a graphviz (dot) style graph.
             #[allow(dead_code)]
             pub fn graph(&self) -> String {
-                self.manager().borrow_mut().graphviz()
+                unsafe { &mut *self.manager().get() }.graphviz()
             }
 
             #[doc(hidden)]
-            pub fn manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
+            pub unsafe fn manager(&self) -> $crate::Shared<$crate::Manager> {
                 self._manager.clone()
             }
         }
@@ -257,6 +259,7 @@ macro_rules! hub {
 /// use the macro instead of implementing this trait directly. This trait is public as an artifact
 /// of the macro requiring public access.
 pub trait Selfscriber<T> {
+    /// Subscribe `Self` to various channels of a hub.
     fn subscribe(hub: &mut T, shared: Shared<Self>);
 }
 
@@ -731,5 +734,28 @@ mod tests {
             count += 1;
         });
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn local_default_trait() {
+        trait Default {}
+        hub! {
+            Hub {
+            }
+        }
+    }
+
+    #[test]
+    fn basic_hub_is_send() {
+        pub trait A: Send {}
+        hub! {
+            Hub {
+                signal: dyn A,
+            }
+        }
+        let mut hub = Hub::new();
+        std::thread::spawn(move || {
+            hub.signal.emit(|_| {});
+        });
     }
 }
