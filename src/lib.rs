@@ -199,7 +199,7 @@ macro_rules! hub {
 
             #[doc(hidden)]
             pub unsafe fn manager(&self) -> $crate::Shared<$crate::Manager> {
-                self._revent_1_manager.clone()
+                self._revent_1_manager.clone_shared()
             }
         }
     };
@@ -262,7 +262,7 @@ macro_rules! hub {
             fn subscribe(hub: &mut $derivative, shared: $crate::Shared<Self>) {
                 unsafe {
                     $(
-                        hub.$subscriptions.subscribe(shared.clone());
+                        hub.$subscriptions.subscribe(shared.clone_shared());
                     )*
                 }
             }

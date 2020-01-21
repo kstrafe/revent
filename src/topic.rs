@@ -45,7 +45,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     #[doc(hidden)]
     pub unsafe fn new(name: &'static str, manager: &Shared<Manager>) -> Self {
         Self(Shared::new(InternalTopic {
-            manager: manager.clone(),
+            manager: manager.clone_shared(),
             name,
             subscribers: Vec::new(),
         }))
@@ -55,7 +55,7 @@ impl<T: 'static + ?Sized> Topic<T> {
     pub unsafe fn clone_activate(&self) -> Self {
         let internal = &mut *(self.0).0.get();
         (&mut *internal.manager.get()).activate_channel(internal.name);
-        Self(self.0.clone())
+        Self(self.0.clone_shared())
     }
 
     #[doc(hidden)]
