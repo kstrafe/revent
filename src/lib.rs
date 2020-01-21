@@ -131,7 +131,7 @@ macro_rules! hub {
         pub struct $hub {
             // TODO: When gensyms are supported make this symbol a gensym.
             #[doc(hidden)]
-            pub _manager: $crate::Shared<$crate::Manager>,
+            pub _revent_1_manager: $crate::Shared<$crate::Manager>,
             $(
                 /// Channel for the given type of event handler.
                 pub $channel: $crate::Topic<$type>
@@ -152,7 +152,7 @@ macro_rules! hub {
                     let $channel = $crate::Topic::new(stringify!($channel), &mng);
                 )*
                 Self {
-                    _manager: mng,
+                    _revent_1_manager: mng,
                     $($channel),*
                 }
             }
@@ -188,7 +188,7 @@ macro_rules! hub {
 
             #[doc(hidden)]
             pub unsafe fn manager(&self) -> $crate::Shared<$crate::Manager> {
-                self._manager.clone()
+                self._revent_1_manager.clone()
             }
         }
     };
@@ -205,10 +205,14 @@ macro_rules! hub {
         impl ::std::convert::TryFrom<&$derives> for $hub {
             type Error = ();
             fn try_from(hub: &$derives) -> ::std::result::Result<Self, Self::Error> {
-                Ok(Self {
-                    _manager: hub._manager.clone(),
-                    $($channel: unsafe { hub.$channel.clone_activate() }),*
-                })
+                Ok(
+                    unsafe {
+                        Self {
+                            _revent_1_manager: hub.manager(),
+                            $($channel: hub.$channel.clone_activate()),*
+                        }
+                    }
+                )
             }
         }
     };
@@ -225,9 +229,11 @@ macro_rules! hub {
             type Error = ();
             fn try_from(hub: &$derives) -> ::std::result::Result<Self, Self::Error> {
                 Ok(
-                    Self {
-                        _manager: hub._manager.clone(),
-                        $($channel: hub.$channel.clone_activate()),*
+                    unsafe {
+                        Self {
+                            _revent_1_manager: hub.manager(),
+                            $($channel: hub.$channel.clone_activate()),*
+                        }
                     }
                 )
             }

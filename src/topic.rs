@@ -52,20 +52,14 @@ impl<T: 'static + ?Sized> Topic<T> {
     #[doc(hidden)]
     pub unsafe fn clone_activate(&self) -> Self {
         let internal = &mut *(self.0).0.get();
-        (&mut *internal
-                .manager
-                .get())
-            .activate_channel(internal.name);
+        (&mut *internal.manager.get()).activate_channel(internal.name);
         Self(self.0.clone())
     }
 
     #[doc(hidden)]
     pub unsafe fn subscribe(&mut self, shared: Shared<T>) {
         let internal = &mut *(self.0).0.get();
-        (&mut *internal
-            .manager
-            .get())
-            .subscribe_channel(internal.name);
+        (&mut *internal.manager.get()).subscribe_channel(internal.name);
         internal.subscribers.push(shared);
     }
 }
