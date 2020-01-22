@@ -1,109 +1,42 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use revent::{hub, Subscriber};
-
-pub trait Signal {
-    fn signal(&mut self);
-}
-
-struct Handler;
-impl Signal for Handler {
-    fn signal(&mut self) {}
-}
-impl Subscriber for Handler {
-    type Hub = HandlerHub;
-    type Input = ();
-    fn build(_: Self::Hub, _: Self::Input) -> Self {
-        Self
-    }
-}
-
-hub! {
-    Hub {
-        signal: dyn Signal,
-    }
-}
-
-hub! {
-    HandlerHub: Hub {
-    } subscribe Handler {
-        signal,
-    }
-}
+use revent::{shared, Topic};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("empty static function", |b| {
-        #[inline(never)]
-        fn x() {}
+    c.bench_function("empty emit", |b| {
+        let mut topic: Topic<i32> = Topic::new();
         b.iter(|| {
-            x();
-        });
-    });
-
-    c.bench_function("empty signal handler", |b| {
-        let mut hub = Hub::default();
-        b.iter(|| {
-            black_box(&mut hub).signal.emit(|x| {
-                x.signal();
+            black_box(&mut topic).emit(|x| {
+                assert!(*x > 0);
             });
-        });
-    });
-
-    c.bench_function("single signal handler", |b| {
-        let mut hub = Hub::default();
-        hub.subscribe::<Handler>(());
-        b.iter(|| {
-            black_box(&mut hub).signal.emit(|x| {
-                x.signal();
-            });
-        });
-    });
-
-    c.bench_function("many static function", |b| {
-        #[inline(never)]
-        fn x() {}
-        b.iter(|| {
-            for _ in 0..1000 {
-                x();
-            }
-        });
-    });
-
-    c.bench_function("many signal handler", |b| {
-        let mut hub = Hub::default();
-        for _ in 0..1000 {
-            hub.subscribe::<Handler>(());
-        }
-        b.iter(|| {
-            black_box(&mut hub).signal.emit(|x| {
-                x.signal();
-            });
-        });
-    });
-
-    c.bench_function("many remove", |b| {
-        let mut hub = Hub::default();
-        b.iter(|| {
-            for _ in 0..1000 {
-                hub.subscribe::<Handler>(());
-            }
-            black_box(&mut hub).signal.remove(|_| true);
-        });
-    });
-
-    c.bench_function("many subscribe", |b| {
-        let mut hub = Hub::default();
-        b.iter(|| {
-            for _ in 0..1000 {
-                hub.subscribe::<Handler>(());
-            }
-            hub = Hub::default();
         });
     });
 
     c.bench_function("adding subscribers", |b| {
-        let mut hub = Hub::default();
+        let mut topic = Topic::new();
         b.iter(|| {
-            hub.subscribe::<Handler>(());
+            topic.insert(shared(123));
+        });
+    });
+
+    c.bench_function("single emit", |b| {
+        let mut topic = Topic::new();
+        topic.insert(shared(123));
+        b.iter(|| {
+            black_box(&mut topic).emit(|x| {
+                assert!(*x > 0);
+            });
+        });
+    });
+
+    c.bench_function("many emit", |b| {
+        let mut topic = Topic::new();
+        for val in 1..1000 {
+            topic.insert(shared(val));
+        }
+        b.iter(|| {
+            black_box(&mut topic).emit(|x| {
+                assert!(*x > 0);
+            });
         });
     });
 }
