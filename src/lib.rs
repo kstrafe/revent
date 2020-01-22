@@ -56,6 +56,8 @@
 //! It's possible to put a single object in two or more [Topic]s. If one topic is able to emit
 //! into another topic then we may get a double-mutable borrow.
 //!
+//! The following code panics because of 2 mutable borrows.
+//!
 //! ```should_panic
 //! use revent::{shared, Topic};
 //!
@@ -103,8 +105,9 @@
     missing_docs,
     trivial_casts,
     trivial_numeric_casts,
+    unsafe_code,
     unused_import_braces,
-    unused_qualifications
+    unused_qualifications,
 )]
 #![feature(drain_filter)]
 
