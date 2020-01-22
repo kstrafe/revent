@@ -107,11 +107,14 @@
     trivial_numeric_casts,
     unsafe_code,
     unused_import_braces,
-    unused_qualifications,
+    unused_qualifications
 )]
 #![feature(drain_filter)]
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{RefCell, RefMut},
+    rc::Rc,
+};
 
 /// A topic to which objects can subscribe.
 pub struct Topic<T: ?Sized>(Vec<Rc<RefCell<T>>>);
@@ -137,7 +140,7 @@ impl<T: ?Sized> Topic<T> {
         F: FnMut(&mut T),
     {
         for item in self.access() {
-            caller(&mut *item.borrow_mut());
+            caller(&mut *revent_borrow_mut(item))
         }
     }
 
@@ -150,7 +153,7 @@ impl<T: ?Sized> Topic<T> {
         F: FnMut(&mut T) -> bool + 'a,
     {
         self.access()
-            .drain_filter(move |x| caller(&mut *x.borrow_mut()))
+            .drain_filter(move |x| caller(&mut *revent_borrow_mut(x)))
     }
 
     fn access(&mut self) -> &mut Vec<Rc<RefCell<T>>> {
@@ -167,6 +170,15 @@ impl<T: ?Sized> Default for Topic<T> {
 /// Wrapper for `Rc::new(RefCell::new(_))`.
 pub fn shared<T>(item: T) -> Rc<RefCell<T>> {
     Rc::new(RefCell::new(item))
+}
+
+fn revent_borrow_mut<T: ?Sized>(item: &RefCell<T>) -> RefMut<T> {
+    match item.try_borrow_mut() {
+        Ok(item) => item,
+        Err(err) => {
+            panic!("revent: {}", err);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -216,5 +228,42 @@ mod tests {
             count += 1;
         });
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: already borrowed")]
+    fn double_mutable_borrow() {
+        trait A {
+            fn a(&mut self, b: &mut Topic<dyn B>);
+        }
+
+        trait B {
+            fn b(&mut self);
+        }
+
+        struct X;
+
+        impl A for X {
+            fn a(&mut self, b: &mut Topic<dyn B>) {
+                b.emit(|x| {
+                    x.b();
+                });
+            }
+        }
+
+        impl B for X {
+            fn b(&mut self) {}
+        }
+
+        let mut a: Topic<dyn A> = Topic::new();
+        let mut b: Topic<dyn B> = Topic::new();
+
+        let x = shared(X);
+        a.insert(x.clone());
+        b.insert(x.clone());
+
+        a.emit(|x| {
+            x.a(&mut b);
+        });
     }
 }
