@@ -150,7 +150,7 @@ impl<T: ?Sized> Topic<T> {
             .drain_filter(move |x| caller(&mut *x.borrow_mut()))
     }
 
-    fn access<'a>(&mut self) -> &mut Vec<Rc<RefCell<T>>> {
+    fn access(&mut self) -> &mut Vec<Rc<RefCell<T>>> {
         &mut self.0
     }
 }
