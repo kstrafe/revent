@@ -1,42 +1,148 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use revent::{shared, Topic};
+use revent::{hub, node, Subscriber};
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("empty emit", |b| {
-        let mut topic: Topic<i32> = Topic::new();
+        pub trait A {}
+        hub! {
+            X {
+                a: A,
+            }
+        }
+        let mut x = X::new();
         b.iter(|| {
-            black_box(&mut topic).emit(|x| {
-                assert!(*x > 0);
-            });
-        });
-    });
-
-    c.bench_function("adding subscribers", |b| {
-        let mut topic = Topic::new();
-        b.iter(|| {
-            topic.insert(shared(123));
+            x.a.emit(|_| {});
         });
     });
 
     c.bench_function("single emit", |b| {
-        let mut topic = Topic::new();
-        topic.insert(shared(123));
+        pub trait A {}
+        hub! {
+            X {
+                a: A,
+            }
+        }
+
+        node! {
+            X {
+                a: A,
+            } => Node(Handler) {
+            }
+        }
+
+        struct Handler;
+        impl A for Handler {}
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut x = X::new();
+        x.subscribe::<Handler>(());
         b.iter(|| {
-            black_box(&mut topic).emit(|x| {
-                assert!(*x > 0);
-            });
+            x.a.emit(|_| {});
         });
     });
 
     c.bench_function("many emit", |b| {
-        let mut topic = Topic::new();
-        for val in 1..1000 {
-            topic.insert(shared(val));
+        pub trait A {}
+        hub! {
+            X {
+                a: A,
+            }
         }
+
+        node! {
+            X {
+                a: A,
+            } => Node(Handler) {
+            }
+        }
+
+        struct Handler;
+        impl A for Handler {}
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut x = X::new();
+        for _ in 0..1000 {
+            x.subscribe::<Handler>(());
+        }
+
         b.iter(|| {
-            black_box(&mut topic).emit(|x| {
-                assert!(*x > 0);
-            });
+            x.a.emit(|_| {});
+        });
+    });
+
+    c.bench_function("many remove", |b| {
+        pub trait A {}
+        hub! {
+            X {
+                a: A,
+            }
+        }
+
+        node! {
+            X {
+                a: A,
+            } => Node(Handler) {
+            }
+        }
+
+        struct Handler;
+        impl A for Handler {}
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut x = X::new();
+        for _ in 0..1000 {
+            x.subscribe::<Handler>(());
+        }
+
+        b.iter(|| {
+            x.a.remove(|_| false);
+        });
+    });
+
+    c.bench_function("subscribe and remove", |b| {
+        pub trait A {}
+        hub! {
+            X {
+                a: A,
+            }
+        }
+
+        node! {
+            X {
+                a: A,
+            } => Node(Handler) {
+            }
+        }
+
+        struct Handler;
+        impl A for Handler {}
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut x = X::new();
+
+        b.iter(|| {
+            x.subscribe::<Handler>(());
+            x.a.remove(|_| true);
         });
     });
 }
