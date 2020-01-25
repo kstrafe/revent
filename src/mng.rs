@@ -1,5 +1,6 @@
 #![doc(hidden)]
 use std::{
+    any::TypeId,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Display, Formatter},
 };
@@ -7,75 +8,104 @@ use std::{
 type ChannelName = &'static str;
 type HandlerName = &'static str;
 
-pub struct Manager {
-    active: Vec<HandlerName>,
-    amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
-    connections: BTreeMap<HandlerName, (BTreeSet<ChannelName>, BTreeSet<ChannelName>)>,
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct HandlerId {
+    name: HandlerName,
+    type_id: TypeId,
+}
 
-    emitters: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
-    subscribers: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
+enum ActiveHandler {
+    Id { id: HandlerId },
+    Ignore,
+}
+
+pub struct Manager {
+    active: Vec<ActiveHandler>,
+    amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
+    connections: BTreeMap<HandlerId, (BTreeSet<ChannelName>, BTreeSet<ChannelName>)>,
+
+    emitters: BTreeMap<ChannelName, BTreeSet<HandlerId>>,
+    subscribers: BTreeMap<ChannelName, BTreeSet<HandlerId>>,
+
+    seen: BTreeSet<TypeId>,
 }
 
 impl Manager {
-    pub fn prepare_construction(&mut self, name: &'static str) {
-        self.active.push(name);
+    pub fn prepare_construction(&mut self, name: &'static str, type_id: TypeId) {
+        if self.seen.contains(&type_id) {
+            self.active.push(ActiveHandler::Ignore);
+        } else {
+            self.seen.insert(type_id);
+            self.active.push(ActiveHandler::Id {
+                id: HandlerId { name, type_id },
+            });
+        }
     }
 
     pub fn register_emit(&mut self, signal: &'static str) {
         let name = self.active.last().unwrap();
-        let connection = self
-            .connections
-            .entry(name)
-            .or_insert_with(|| Default::default());
-        connection.1.insert(signal);
+        match name {
+            ActiveHandler::Id { id } => {
+                let connection = self.connections.entry(*id).or_insert_with(Default::default);
+                connection.1.insert(signal);
 
-        self.emitters
-            .entry(signal)
-            .or_insert_with(Default::default)
-            .insert(name);
+                self.emitters
+                    .entry(signal)
+                    .or_insert_with(Default::default)
+                    .insert(*id);
+            }
+            ActiveHandler::Ignore => {}
+        }
     }
 
     pub fn register_subscribe(&mut self, signal: &'static str) {
         let name = self.active.last().unwrap();
-        let connection = self
-            .connections
-            .entry(name)
-            .or_insert_with(|| Default::default());
-        connection.0.insert(signal);
+        match name {
+            ActiveHandler::Id { id } => {
+                let connection = self.connections.entry(*id).or_insert_with(Default::default);
+                connection.0.insert(signal);
 
-        self.subscribers
-            .entry(signal)
-            .or_insert_with(Default::default)
-            .insert(name);
+                self.subscribers
+                    .entry(signal)
+                    .or_insert_with(Default::default)
+                    .insert(*id);
+            }
+            ActiveHandler::Ignore => {}
+        }
     }
 
     pub fn finish_construction(&mut self) {
         let name = self.active.pop().unwrap();
-        let connection = self
-            .connections
-            .entry(name)
-            .or_insert_with(|| Default::default());
-        for item in &connection.0 {
-            let emit = self
-                .amalgam
-                .entry(item)
-                .or_insert_with(|| Default::default());
-            for emission in &connection.1 {
-                emit.insert(emission);
-            }
-        }
-
-        match chkrec(&self.amalgam) {
-            Ok(()) => {}
-            Err(chain) => {
-                panic!(
-                    "{}",
-                    RecursionPrinter {
-                        chain,
-                        manager: self,
+        match name {
+            ActiveHandler::Id { id } => {
+                let connection = self
+                    .connections
+                    .entry(id)
+                    .or_insert_with(|| Default::default());
+                for item in &connection.0 {
+                    let emit = self
+                        .amalgam
+                        .entry(item)
+                        .or_insert_with(|| Default::default());
+                    for emission in &connection.1 {
+                        emit.insert(emission);
                     }
-                );
+                }
+
+                match chkrec(&self.amalgam) {
+                    Ok(()) => {}
+                    Err(chain) => {
+                        panic!(
+                            "revent found a recursion during subscription: {}",
+                            RecursionPrinter {
+                                chain,
+                                manager: self,
+                            }
+                        );
+                    }
+                }
             }
+            ActiveHandler::Ignore => {}
         }
     }
 }
@@ -86,8 +116,11 @@ impl Default for Manager {
             active: Default::default(),
             amalgam: Default::default(),
             connections: Default::default(),
+
             emitters: Default::default(),
             subscribers: Default::default(),
+
+            seen: Default::default(),
         }
     }
 }
@@ -133,6 +166,8 @@ impl<'a> Display for RecursionPrinter<'a> {
         if self.chain.len() < 2 {
             panic!("internal recursion check error: chain has length < 2");
         } else if self.chain.len() >= 2 {
+            let mut name_enumerator = HandlerEnumerator::default();
+
             for window in self.chain.windows(2) {
                 let from = window[0];
                 let to = window[1];
@@ -146,15 +181,70 @@ impl<'a> Display for RecursionPrinter<'a> {
 
                 write!(f, "[")?;
                 if let Some(item) = intersection.next() {
-                    write!(f, "{}", item)?;
+                    write!(f, "{}{}", item.name, name_enumerator.enumerate_name(*item))?;
                 }
                 for item in intersection {
-                    write!(f, ", {}", item)?;
+                    write!(
+                        f,
+                        ", {}{}",
+                        item.name,
+                        name_enumerator.enumerate_name(*item)
+                    )?;
                 }
                 write!(f, "]{} -> ", from)?;
             }
 
             write!(f, "{}", self.chain.last().unwrap())?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct HandlerEnumerator {
+    type_count: BTreeMap<HandlerName, BTreeMap<TypeId, usize>>,
+}
+
+impl HandlerEnumerator {
+    fn enumerate_name(&mut self, id: HandlerId) -> MaybeUsize {
+        if let Some(value) = self
+            .type_count
+            .entry(id.name)
+            .or_insert_with(Default::default)
+            .get(&id.type_id)
+        {
+            (*value).into()
+        } else {
+            let count = self.type_count.get(id.name).unwrap().len();
+            self.type_count
+                .get_mut(id.name)
+                .unwrap()
+                .insert(id.type_id, count);
+            count.into()
+        }
+    }
+}
+
+enum MaybeUsize {
+    Value(usize),
+    Nothing,
+}
+
+impl From<usize> for MaybeUsize {
+    fn from(item: usize) -> Self {
+        if item == 0 {
+            MaybeUsize::Nothing
+        } else {
+            MaybeUsize::Value(item)
+        }
+    }
+}
+
+impl Display for MaybeUsize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(value) => write!(f, "#{}", value)?,
+            Self::Nothing => {}
         }
         Ok(())
     }

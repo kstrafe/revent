@@ -332,6 +332,7 @@ macro_rules! hub {
 ///
 /// impl revent::Selfscriber<HubName> for MyHandler {
 ///     fn name() -> &'static str { ... }
+///     fn type_id() -> TypeId { ... }
 ///     fn selfscribe(holder: &HubName, item: Rc<RefCell<Self>>) { ... }
 /// }
 ///
@@ -390,7 +391,7 @@ macro_rules! node_internal {
                 T: $crate::Nodified + $crate::Selfscriber<Self> + $crate::Subscriber,
                 T::Node: for<'a> ::std::convert::From<&'a Self>,
             {
-                self._private_revent_1_manager.borrow_mut().prepare_construction(T::name());
+                self._private_revent_1_manager.borrow_mut().prepare_construction(T::name(), T::type_id());
 
                 let sub: T::Node = ::std::convert::From::from(&*self);
 
@@ -433,6 +434,12 @@ macro_rules! node_internal {
             fn name() -> &'static str {
                 stringify!($on)
             }
+
+            fn type_id() -> ::std::any::TypeId {
+                ::std::any::TypeId::of::<Self>()
+            }
+
+            #[allow(unused_variables)]
             fn selfscribe(holder: &$source, item: ::std::rc::Rc<::std::cell::RefCell<Self>>) {
                 $(holder.$listen.insert(item.clone());)*
             }
@@ -680,5 +687,226 @@ mod tests {
             assert_eq!(item.value(), count);
             count -= 1;
         });
+    }
+
+    #[test]
+    #[should_panic(expected = "revent found a recursion during subscription: [Handler]a -> a")]
+    fn same_name_different_module_recursion() {
+        mod test {
+            pub trait A {}
+
+            hub! {
+                X {
+                    a: A,
+                }
+            }
+
+            pub mod a {
+                use super::{A, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        a: A,
+                    } => Node(Handler) {
+                    }
+                }
+
+                pub struct Handler;
+
+                impl A for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+
+            pub mod b {
+                use super::{A, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        a: A,
+                    } => Node(Handler) {
+                        a: A,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl A for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+        }
+
+        let mut x = test::X::new();
+
+        x.subscribe::<test::a::Handler>(());
+        x.subscribe::<test::b::Handler>(());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "revent found a recursion during subscription: [Handler]a -> [Handler#1]b -> a"
+    )]
+    fn same_name_different_module_cooperative_recursion() {
+        mod test {
+            pub trait A {}
+            pub trait B {}
+
+            hub! {
+                X {
+                    a: A,
+                    b: B,
+                }
+            }
+
+            pub mod a {
+                use super::{A, B, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        a: A,
+                    } => Node(Handler) {
+                        b: B,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl A for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+
+            pub mod b {
+                use super::{A, B, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        b: B,
+                    } => Node(Handler) {
+                        a: A,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl B for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+        }
+
+        let mut x = test::X::new();
+
+        x.subscribe::<test::a::Handler>(());
+        x.subscribe::<test::b::Handler>(());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "revent found a recursion during subscription: [Handler]a -> [Handler#1]b -> [Handler#2]c -> a"
+    )]
+    fn even_deeper_same_name_recursion() {
+        mod test {
+            pub trait A {}
+            pub trait B {}
+            pub trait C {}
+
+            hub! {
+                X {
+                    a: A,
+                    b: B,
+                    c: C,
+                }
+            }
+
+            pub mod a {
+                use super::{A, B, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        a: A,
+                    } => Node(Handler) {
+                        b: B,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl A for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+
+            pub mod b {
+                use super::{B, C, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        b: B,
+                    } => Node(Handler) {
+                        c: C,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl B for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+
+            pub mod c {
+                use super::{A, C, X};
+                use crate::Subscriber;
+                node! {
+                    X {
+                        c: B,
+                    } => Node(Handler) {
+                        a: A,
+                    }
+                }
+
+                pub struct Handler;
+
+                impl C for Handler {}
+                impl Subscriber for Handler {
+                    type Input = ();
+                    fn build(_: Self::Node, _: Self::Input) -> Self {
+                        Self
+                    }
+                }
+            }
+        }
+
+        let mut x = test::X::new();
+
+        x.subscribe::<test::a::Handler>(());
+        x.subscribe::<test::b::Handler>(());
+        x.subscribe::<test::c::Handler>(());
     }
 }

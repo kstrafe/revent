@@ -1,12 +1,17 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{any::TypeId, cell::RefCell, rc::Rc};
 
 /// Describes how a type must insert itself into signals.
+///
+/// Use the [node] macro to generate this implementation.
+/// Revents internal cycle check assumes that a type.
 #[doc(hidden)]
 pub trait Selfscriber<T> {
     /// Name of the struct implementing [Selfscriber].
     ///
     /// Implemented bv the [node] macro.
     fn name() -> &'static str;
+    /// TypeId of Self.
+    fn type_id() -> TypeId;
     /// Inserts `item` in various signals in `T`.
     fn selfscribe(holder: &T, item: Rc<RefCell<Self>>);
 }
