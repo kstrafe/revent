@@ -393,11 +393,11 @@ macro_rules! node_internal {
             pub fn subscribe<T>(&mut self, input: T::Input)
             where
                 T: $crate::Nodified + $crate::Selfscriber<Self> + $crate::Subscriber,
-                T::Node: for<'a> ::std::convert::From<&'a Self>,
+                T::Node: for<'a> ::std::convert::From<&'a mut Self>,
             {
                 self._private_revent_1_manager.borrow_mut().prepare_construction(T::name(), T::type_id());
 
-                let sub: T::Node = ::std::convert::From::from(&*self);
+                let sub: T::Node = ::std::convert::From::from(&mut *self);
 
                 let item = ::std::rc::Rc::new(::std::cell::RefCell::new(T::build(sub, input)));
                 T::selfscribe(self, item);
@@ -412,6 +412,11 @@ macro_rules! node_internal {
                     &mut self.$emit
                 }
             )*
+
+            #[doc(hidden)]
+            pub fn _private_revent_1_manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
+                self._private_revent_1_manager.clone()
+            }
         }
 
         impl ::std::ops::Drop for $hub {
@@ -422,11 +427,11 @@ macro_rules! node_internal {
     (from $hub:path, $source:path {
          $($emit:ident: $emit_type:path),*
      }) => {
-        impl ::std::convert::From<&'_ $source> for $hub {
-            fn from(item: &$source) -> Self {
+        impl ::std::convert::From<&'_ mut $source> for $hub {
+            fn from(item: &mut $source) -> Self {
                 Self {
-                    _private_revent_1_manager: item._private_revent_1_manager.clone(),
-                    $($emit: item.$emit.internal_clone()),*
+                    _private_revent_1_manager: item._private_revent_1_manager().clone(),
+                    $($emit: item.$emit().internal_clone()),*
                 }
             }
         }
@@ -455,8 +460,8 @@ macro_rules! node_internal {
             }
 
             #[allow(unused_variables)]
-            fn selfscribe(holder: &$source, item: ::std::rc::Rc<::std::cell::RefCell<Self>>) {
-                $(holder.$listen.insert(item.clone());)*
+            fn selfscribe(holder: &mut $source, item: ::std::rc::Rc<::std::cell::RefCell<Self>>) {
+                $(holder.$listen().insert(item.clone());)*
             }
         }
 

@@ -13,7 +13,7 @@ pub trait Selfscriber<T> {
     /// TypeId of Self.
     fn type_id() -> TypeId;
     /// Inserts `item` in various signals in `T`.
-    fn selfscribe(holder: &T, item: Rc<RefCell<Self>>);
+    fn selfscribe(holder: &mut T, item: Rc<RefCell<Self>>);
 }
 
 /// Describes which internal node is used for `Self`.
