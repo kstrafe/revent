@@ -11,7 +11,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         }
         let mut x = X::new();
         b.iter(|| {
-            x.a.emit(|_| {});
+            x.a().emit(|_| {});
         });
     });
 
@@ -42,7 +42,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let mut x = X::new();
         x.subscribe::<Handler>(());
         b.iter(|| {
-            x.a.emit(|_| {});
+            x.a().emit(|_| {});
         });
     });
 
@@ -76,7 +76,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         }
 
         b.iter(|| {
-            x.a.emit(|_| {});
+            x.a().emit(|_| {});
         });
     });
 
@@ -142,7 +142,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         b.iter(|| {
             x.subscribe::<Handler>(());
-            x.a.remove(|_| true);
+            x.a().remove(|_| true);
         });
     });
 }

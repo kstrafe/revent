@@ -61,7 +61,7 @@
 //! x.subscribe::<MyHandler>(input);
 //!
 //! // Emit an event on the `signal_1` channel.
-//! x.signal_1.emit(|subscriber| {
+//! x.signal_1().emit(|subscriber| {
 //!     subscriber.function();
 //! });
 //! ```
@@ -107,7 +107,7 @@
 //! impl Subscriber for MyHandler {
 //!     type Input = ();
 //!     fn build(mut node: Self::Node, _input: Self::Input) -> Self {
-//!         node.signal_2.emit(|subscriber| {
+//!         node.signal_2().emit(|subscriber| {
 //!             subscriber.function_b();
 //!         });
 //!         Self
@@ -160,7 +160,7 @@
 //!
 //! impl A for AToBHandler {
 //!     fn a(&mut self) {
-//!         self.node.b.emit(|x| {
+//!         self.node.b().emit(|x| {
 //!             x.b();
 //!         });
 //!     }
@@ -187,7 +187,7 @@
 //!
 //! impl B for BToAHandler {
 //!     fn b(&mut self) {
-//!         self.node.a.emit(|x| {
+//!         self.node.a().emit(|x| {
 //!             x.a();
 //!         });
 //!     }
@@ -246,11 +246,7 @@ pub use traits::{Nodified, Selfscriber, Subscriber};
 /// generates the code
 ///
 /// ```ignore
-/// struct HubName {
-///     pub signal_name_1: revent::Signal<dyn X>,
-///     pub signal_name_2: revent::Signal<dyn Y>,
-///     pub signal_name_3: revent::Signal<dyn Z>,
-/// }
+/// struct HubName { ... }
 ///
 /// impl HubName {
 ///     fn new() -> Self { ... }
@@ -260,6 +256,10 @@ pub use traits::{Nodified, Selfscriber, Subscriber};
 ///         T: revent::Nodified + revent::Selfscriber<Self> + revent::Subscriber,
 ///         T::Node: for<'a> From<&'a Self>,
 ///     { ... }
+///
+///     pub fn signal_name_1(&mut self) -> &mut revent::Signal<dyn X> { ... }
+///     pub fn signal_name_2(&mut self) -> &mut revent::Signal<dyn Y> { ... }
+///     pub fn signal_name_3(&mut self) -> &mut revent::Signal<dyn Z> { ... }
 /// }
 ///
 /// impl Default for HubName {
@@ -278,6 +278,7 @@ macro_rules! hub {
         }
 
         impl $name {
+            /// Create a new hub instance.
             pub fn new() -> Self {
                 let manager = ::std::rc::Rc::new(::std::cell::RefCell::new($crate::Manager::default()));
                 Self {
@@ -314,9 +315,7 @@ macro_rules! hub {
 /// generates the code
 ///
 /// ```ignore
-/// struct MyNode {
-///     pub signal_name_3: revent::Signal<dyn Z>,
-/// }
+/// struct MyNode { ... }
 ///
 /// impl MyNode {
 ///     pub fn subscribe<T>(&mut self, input: T::Input)
@@ -324,6 +323,8 @@ macro_rules! hub {
 ///         T: revent::Nodified + revent::Selfscriber<Self> + revent::Subscriber,
 ///         T::Node: for<'a> From<&'a Self>,
 ///     { ... }
+///
+///     pub fn signal_name_3(&mut self) -> &mut revent::Signal<dyn Z> { ... }
 /// }
 ///
 /// impl From<&'_ HubName> for MyNode {
@@ -379,12 +380,15 @@ macro_rules! node_internal {
     (hub $hub:ident {
          $($emit:ident: $emit_type:path),*
      }) => {
+        /// Event hub.
         pub struct $hub {
             _private_revent_1_manager: ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>>,
-            $(pub $emit: $crate::Signal<dyn $emit_type>),*
+            $($emit: $crate::Signal<dyn $emit_type>),*
         }
 
+
         impl $hub {
+            /// Add a new subscriber.
             #[allow(dead_code)]
             pub fn subscribe<T>(&mut self, input: T::Input)
             where
@@ -400,8 +404,19 @@ macro_rules! node_internal {
 
                 self._private_revent_1_manager.borrow_mut().finish_construction();
             }
+
+            $(
+                /// Access a signal.
+                #[allow(dead_code)]
+                pub fn $emit(&mut self) -> &mut $crate::Signal<dyn $emit_type> {
+                    &mut self.$emit
+                }
+            )*
         }
 
+        impl ::std::ops::Drop for $hub {
+            fn drop(&mut self) {}
+        }
     };
 
     (from $hub:path, $source:path {
@@ -545,7 +560,7 @@ mod tests {
 
         impl A for Handler {
             fn a(&mut self) {
-                self.node.a.emit(|x| {
+                self.node.a().emit(|x| {
                     x.a();
                 });
             }
@@ -561,7 +576,7 @@ mod tests {
         let mut x = X::new();
         x.subscribe::<Handler>(());
 
-        x.a.emit(|x| x.a());
+        x.a().emit(|x| x.a());
     }
 
     #[test]
@@ -596,7 +611,7 @@ mod tests {
 
         impl A for AToBHandler {
             fn a(&mut self) {
-                self.node.b.emit(|x| {
+                self.node.b().emit(|x| {
                     x.b();
                 });
             }
@@ -623,7 +638,7 @@ mod tests {
 
         impl B for BToAHandler {
             fn b(&mut self) {
-                self.node.a.emit(|x| {
+                self.node.a().emit(|x| {
                     x.a();
                 });
             }
@@ -680,10 +695,10 @@ mod tests {
             x.subscribe::<Handler>(value);
         }
 
-        x.a.sort_by(|a, b| b.value().cmp(&a.value()));
+        x.a().sort_by(|a, b| b.value().cmp(&a.value()));
 
         let mut count = 9;
-        x.a.emit(|item| {
+        x.a().emit(|item| {
             assert_eq!(item.value(), count);
             count -= 1;
         });
