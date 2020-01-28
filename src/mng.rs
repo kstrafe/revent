@@ -249,3 +249,79 @@ impl Display for MaybeUsize {
         Ok(())
     }
 }
+
+pub struct Grapher<'a> {
+    manager: &'a Manager,
+}
+
+impl<'a> Grapher<'a> {
+    pub fn new(manager: &'a Manager) -> Self {
+        Self { manager }
+    }
+}
+
+impl<'a> Display for Grapher<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mng = self.manager;
+
+        write!(f, "digraph Manager {{\n")?;
+
+        for (channel, subscribers) in &mng.subscribers {
+            write!(f, "\t{}[label=\"", channel)?;
+            let mut subscribers = subscribers.iter();
+            if let Some(subscriber) = subscribers.next() {
+                write!(f, "{}", subscriber.name)?;
+            }
+            for subscriber in subscribers {
+                write!(f, "\\n{}", subscriber.name)?;
+            }
+            write!(f, "\"];\n")?;
+        }
+
+        for (from, to) in &mng.amalgam {
+            for to in to {
+                write!(f, "\t{} -> {}[label={}];\n", from, to, to)?;
+            }
+        }
+
+        write!(f, "}}")?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct A;
+    struct B;
+    struct C;
+
+    #[test]
+    fn make_graph() {
+        let mut mng = Manager::default();
+        mng.prepare_construction("A", TypeId::of::<A>());
+        mng.register_emit("b");
+        mng.finish_construction();
+
+        mng.prepare_construction("B", TypeId::of::<B>());
+        mng.register_subscribe("b");
+        mng.register_emit("c");
+        mng.finish_construction();
+
+        mng.prepare_construction("C", TypeId::of::<C>());
+        mng.register_subscribe("b");
+        mng.register_emit("c");
+        mng.finish_construction();
+
+        let grapher = Grapher::new(&mng);
+        assert_eq!(
+            format!("{}", grapher),
+            r#"digraph Manager {
+	b[label="B\nC"];
+	b -> c[label=c];
+}"#
+        );
+    }
+}

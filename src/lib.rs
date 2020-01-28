@@ -218,7 +218,7 @@ mod mng;
 mod signal;
 mod traits;
 #[doc(hidden)]
-pub use mng::Manager;
+pub use mng::{Grapher, Manager};
 pub use signal::Signal;
 pub use traits::{Nodified, Selfscriber, Subscriber};
 
