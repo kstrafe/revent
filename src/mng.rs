@@ -267,20 +267,20 @@ impl<'a> Display for Grapher<'a> {
         write!(f, "digraph Manager {{\n")?;
 
         for (channel, subscribers) in &mng.subscribers {
-            write!(f, "\t{}[label=\"", channel)?;
-            let mut subscribers = subscribers.iter();
-            if let Some(subscriber) = subscribers.next() {
-                write!(f, "{}", subscriber.name)?;
-            }
+            write!(
+                f,
+                "\t{}[label=<<FONT POINT-SIZE=\"20\">{}</FONT>",
+                channel, channel
+            )?;
             for subscriber in subscribers {
-                write!(f, "\\n{}", subscriber.name)?;
+                write!(f, "<BR/>{}", subscriber.name)?;
             }
-            write!(f, "\"];\n")?;
+            write!(f, ">];\n")?;
         }
 
         for (from, to) in &mng.amalgam {
             for to in to {
-                write!(f, "\t{} -> {}[label={}];\n", from, to, to)?;
+                write!(f, "\t{} -> {};\n", from, to)?;
             }
         }
 
@@ -316,11 +316,12 @@ mod tests {
         mng.finish_construction();
 
         let grapher = Grapher::new(&mng);
+        std::fs::write("target/graph.dot", format!("{}", grapher));
         assert_eq!(
             format!("{}", grapher),
             r#"digraph Manager {
-	b[label="B\nC"];
-	b -> c[label=c];
+	b[label=<<FONT POINT-SIZE="20">b</FONT><BR/>B<BR/>C>];
+	b -> c;
 }"#
         );
     }
