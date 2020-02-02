@@ -78,15 +78,9 @@ impl Manager {
         let name = self.active.pop().unwrap();
         match name {
             ActiveHandler::Id { id } => {
-                let connection = self
-                    .connections
-                    .entry(id)
-                    .or_insert_with(|| Default::default());
+                let connection = self.connections.entry(id).or_insert_with(Default::default);
                 for item in &connection.0 {
-                    let emit = self
-                        .amalgam
-                        .entry(item)
-                        .or_insert_with(|| Default::default());
+                    let emit = self.amalgam.entry(item).or_insert_with(Default::default);
                     for emission in &connection.1 {
                         emit.insert(emission);
                     }
@@ -134,6 +128,10 @@ fn chkrec(set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>) -> Result<(), Vec<
         if let Some(node) = set.get(&now) {
             for signal in node.iter() {
                 if chain.contains(&signal) {
+                    chain.push(signal);
+                    while &chain[0] != signal {
+                        chain.remove(0);
+                    }
                     return Err(());
                 }
                 chain.push(*signal);
@@ -148,7 +146,6 @@ fn chkrec(set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>) -> Result<(), Vec<
     for signal in set.keys() {
         chain.push(*signal);
         if let Err(()) = chkreci(signal, set, &mut chain) {
-            chain.push(chain[0]);
             return Err(chain);
         }
         chain.pop();
@@ -164,7 +161,7 @@ struct RecursionPrinter<'a> {
 impl<'a> Display for RecursionPrinter<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self.chain.len() < 2 {
-            panic!("internal recursion check error: chain has length < 2");
+            panic!("revent internal error: recursion chain has length < 2");
         } else if self.chain.len() >= 2 {
             let mut name_enumerator = HandlerEnumerator::default();
 
@@ -172,12 +169,13 @@ impl<'a> Display for RecursionPrinter<'a> {
                 let from = window[0];
                 let to = window[1];
 
+                let emitters = self.manager.emitters.get(to).unwrap();
                 let mut intersection = self
                     .manager
                     .subscribers
                     .get(from)
-                    .unwrap()
-                    .intersection(self.manager.emitters.get(to).unwrap());
+                    .expect("revent internal error: recursion chain contains malformed information")
+                    .intersection(emitters);
 
                 write!(f, "[")?;
                 if let Some(item) = intersection.next() {
@@ -264,7 +262,7 @@ impl<'a> Display for Grapher<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mng = self.manager;
 
-        write!(f, "digraph Manager {{\n")?;
+        writeln!(f, "digraph Manager {{")?;
 
         for (channel, subscribers) in &mng.subscribers {
             write!(
@@ -275,12 +273,12 @@ impl<'a> Display for Grapher<'a> {
             for subscriber in subscribers {
                 write!(f, "<BR/>{}", subscriber.name)?;
             }
-            write!(f, ">];\n")?;
+            writeln!(f, ">];")?;
         }
 
         for (from, to) in &mng.amalgam {
             for to in to {
-                write!(f, "\t{} -> {};\n", from, to)?;
+                writeln!(f, "\t{} -> {};", from, to)?;
             }
         }
 
@@ -316,7 +314,6 @@ mod tests {
         mng.finish_construction();
 
         let grapher = Grapher::new(&mng);
-        std::fs::write("target/graph.dot", format!("{}", grapher));
         assert_eq!(
             format!("{}", grapher),
             r#"digraph Manager {

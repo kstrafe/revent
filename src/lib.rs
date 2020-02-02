@@ -936,4 +936,42 @@ mod tests {
         x.subscribe::<test::b::Handler>(());
         x.subscribe::<test::c::Handler>(());
     }
+
+    #[test]
+    #[should_panic(expected = "revent found a recursion during subscription: [Handler]b -> b")]
+    fn secondary_self_recursion() {
+        pub trait A {}
+        pub trait B {}
+
+        hub! {
+            X {
+                a: A,
+                b: B,
+            }
+        }
+
+        node! {
+            X {
+                a: A,
+                b: B,
+            } => Node(Handler) {
+                b: B,
+            }
+        }
+
+        pub struct Handler;
+
+        impl A for Handler {}
+        impl B for Handler {}
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self
+            }
+        }
+
+        let mut x = X::new();
+
+        x.subscribe::<Handler>(());
+    }
 }
