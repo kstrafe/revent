@@ -29,7 +29,7 @@
 //!     }
 //! }
 //!
-//! // Make `MyHandler` subscribe to `channel`.
+//! // Make `MyHandler` subscribe to `signal_1`.
 //! node! {
 //!     X {
 //!         signal_1: A,
@@ -98,19 +98,23 @@
 //!     }
 //! }
 //!
-//! struct MyHandler;
+//! struct MyHandler {
+//!     node: Node,
+//! }
+//!
 //! impl A for MyHandler {
-//!     fn function_a(&mut self) { }
+//!     fn function_a(&mut self) {
+//!         self.node.signal_2().emit(|subscriber| {
+//!             subscriber.function_b();
+//!         });
+//!     }
 //! }
 //!
 //! // Describe how to build an instance of `MyHandler`.
 //! impl Subscriber for MyHandler {
 //!     type Input = ();
 //!     fn build(mut node: Self::Node, _input: Self::Input) -> Self {
-//!         node.signal_2().emit(|subscriber| {
-//!             subscriber.function_b();
-//!         });
-//!         Self
+//!         Self { node }
 //!     }
 //! }
 //! ```
