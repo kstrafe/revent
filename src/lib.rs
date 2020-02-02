@@ -413,6 +413,13 @@ macro_rules! node_internal {
                 }
             )*
 
+            /// Generate a dependency graph in the graphviz `dot` language.
+            #[allow(dead_code)]
+            pub fn generate_graphviz(&self) -> String {
+                let mng = self._private_revent_1_manager.borrow_mut();
+                format!("{}", $crate::Grapher::new(&*mng))
+            }
+
             #[doc(hidden)]
             pub fn _private_revent_1_manager(&self) -> ::std::rc::Rc<::std::cell::RefCell<$crate::Manager>> {
                 self._private_revent_1_manager.clone()
