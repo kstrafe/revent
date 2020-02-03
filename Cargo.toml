@@ -1,6 +1,6 @@
 [package]
 name = "revent"
-version = "0.10.2"
+version = "0.10.4"
 license = "LGPL-3.0"
 description = "Event system for Rust"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
@@ -8,9 +8,6 @@ edition = "2018"
 documentation = "https://docs.rs/revent"
 repository = "https://github.com/BourgondAries/revent.git"
 homepage = "https://github.com/BourgondAries/revent.git"
-
-[dependencies]
-slog = { version = "2.5.2", optional = true }
 
 [dev-dependencies]
 criterion = "0.3"
