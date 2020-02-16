@@ -1,6 +1,6 @@
 [package]
 name = "revent"
-version = "0.10.6"
+version = "0.11.0"
 license = "LGPL-3.0"
 description = "Event system for Rust"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>"]

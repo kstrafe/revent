@@ -255,7 +255,7 @@ pub use traits::{Nodified, Selfscriber, Subscriber};
 /// impl HubName {
 ///     fn new() -> Self { ... }
 ///
-///     pub fn subscribe<T>(&mut self, input: T::Input)
+///     pub fn subscribe<T>(&mut self, input: T::Input) -> ::std::rc::Rc<::std::cell::RefCell<T>>
 ///     where
 ///         T: revent::Nodified + revent::Selfscriber<Self> + revent::Subscriber,
 ///         T::Node: for<'a> From<&'a Self>,
@@ -270,6 +270,9 @@ pub use traits::{Nodified, Selfscriber, Subscriber};
 ///     fn default() -> Self { ... }
 /// }
 /// ```
+///
+/// Note that while the `subscribe` function returns a reference to the built node object, it
+/// should only be used for testing purposes.
 #[macro_export]
 macro_rules! hub {
     ($name:ident {
@@ -322,7 +325,7 @@ macro_rules! hub {
 /// struct MyNode { ... }
 ///
 /// impl MyNode {
-///     pub fn subscribe<T>(&mut self, input: T::Input)
+///     pub fn subscribe<T>(&mut self, input: T::Input) -> ::std::rc::Rc<::std::cell::RefCell<T>>
 ///     where
 ///         T: revent::Nodified + revent::Selfscriber<Self> + revent::Subscriber,
 ///         T::Node: for<'a> From<&'a Self>,
@@ -394,7 +397,7 @@ macro_rules! node_internal {
         impl $hub {
             /// Add a new subscriber.
             #[allow(dead_code)]
-            pub fn subscribe<T>(&mut self, input: T::Input)
+            pub fn subscribe<T>(&mut self, input: T::Input) -> ::std::rc::Rc<::std::cell::RefCell<T>>
             where
                 T: $crate::Nodified + $crate::Selfscriber<Self> + $crate::Subscriber,
                 T::Node: for<'a> ::std::convert::From<&'a mut Self>,
@@ -404,9 +407,10 @@ macro_rules! node_internal {
                 let sub: T::Node = ::std::convert::From::from(&mut *self);
 
                 let item = ::std::rc::Rc::new(::std::cell::RefCell::new(T::build(sub, input)));
-                T::selfscribe(self, item);
+                T::selfscribe(self, item.clone());
 
                 self._private_revent_1_manager.borrow_mut().finish_construction();
+                item
             }
 
             $(
@@ -547,6 +551,50 @@ mod tests {
 
         X::new();
         X::default();
+    }
+
+    #[test]
+    fn accessing_the_subscriber_return() {
+        pub trait A {
+            fn a(&mut self);
+        }
+
+        hub! {
+            X {
+                a: A,
+            }
+        }
+
+        node! {
+            X {
+                a: A,
+            } => Node(Handler) {
+            }
+        }
+
+        struct Handler {
+            number: i32,
+        }
+
+        impl A for Handler {
+            fn a(&mut self) {
+                assert_eq!(self.number, 32);
+            }
+        }
+
+        impl Subscriber for Handler {
+            type Input = ();
+            fn build(_: Self::Node, _: Self::Input) -> Self {
+                Self { number: 0 }
+            }
+        }
+
+        let mut x = X::new();
+        let a = x.subscribe::<Handler>(());
+
+        a.borrow_mut().number = 32;
+
+        x.a().emit(|x| x.a());
     }
 
     #[test]
