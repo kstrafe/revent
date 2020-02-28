@@ -1,4 +1,3 @@
-#![doc(hidden)]
 use std::{
     any::TypeId,
     collections::{BTreeMap, BTreeSet},
@@ -19,6 +18,16 @@ enum ActiveHandler {
     Ignore,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum Mode {
+    Adding,
+    Removing,
+}
+
+/// Inspects how various [Subscriber](crate::Subscriber)s use [Slot](crate::Slot)s.
+///
+/// Will [panic] if there exists any subscriber cycle. Cycle detection occurs only during
+/// [Node::subscribe](crate::Node::subscribe). Emitting will not perform any cycle detection.
 pub struct Manager {
     active: Vec<ActiveHandler>,
     amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
@@ -31,7 +40,12 @@ pub struct Manager {
 }
 
 impl Manager {
-    pub fn prepare_construction(&mut self, name: &'static str, type_id: TypeId) {
+    /// Create a new manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn prepare_construction(&mut self, name: &'static str, type_id: TypeId) {
         if self.seen.contains(&type_id) {
             self.active.push(ActiveHandler::Ignore);
         } else {
@@ -42,7 +56,7 @@ impl Manager {
         }
     }
 
-    pub fn register_emit(&mut self, signal: &'static str) {
+    pub(crate) fn register_emit(&mut self, signal: &'static str) {
         let name = self.active.last().unwrap();
         match name {
             ActiveHandler::Id { id } => {
@@ -58,7 +72,7 @@ impl Manager {
         }
     }
 
-    pub fn register_subscribe(&mut self, signal: &'static str) {
+    pub(crate) fn register_subscribe(&mut self, signal: &'static str) {
         let name = self.active.last().unwrap();
         match name {
             ActiveHandler::Id { id } => {
@@ -74,7 +88,7 @@ impl Manager {
         }
     }
 
-    pub fn finish_construction(&mut self) {
+    pub(crate) fn finish_construction(&mut self) {
         let name = self.active.pop().unwrap();
         match name {
             ActiveHandler::Id { id } => {
@@ -153,6 +167,8 @@ fn chkrec(set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>) -> Result<(), Vec<
     Ok(())
 }
 
+// ---
+
 struct RecursionPrinter<'a> {
     chain: Vec<ChannelName>,
     manager: &'a Manager,
@@ -198,6 +214,8 @@ impl<'a> Display for RecursionPrinter<'a> {
     }
 }
 
+// ---
+
 #[derive(Default)]
 struct HandlerEnumerator {
     type_count: BTreeMap<HandlerName, BTreeMap<TypeId, usize>>,
@@ -222,6 +240,8 @@ impl HandlerEnumerator {
         }
     }
 }
+
+// ---
 
 enum MaybeUsize {
     Value(usize),
@@ -248,11 +268,15 @@ impl Display for MaybeUsize {
     }
 }
 
+// ---
+
+/// Wrapper around a [Manager] that generates a graph.
 pub struct Grapher<'a> {
     manager: &'a Manager,
 }
 
 impl<'a> Grapher<'a> {
+    /// Create a new grapher.
     pub fn new(manager: &'a Manager) -> Self {
         Self { manager }
     }
@@ -287,6 +311,8 @@ impl<'a> Display for Grapher<'a> {
         Ok(())
     }
 }
+
+// ---
 
 #[cfg(test)]
 mod tests {

@@ -1,32 +1,140 @@
+use crate::{Manager, Mode};
 use std::{any::TypeId, cell::RefCell, rc::Rc};
 
-/// Describes how a type must insert itself into signals.
+/// A collection of [Slot](crate::Slot)s to which [Subscriber]s can subscribe.
 ///
-/// Use the [node] macro to generate this implementation.
-/// Revents internal cycle check assumes that a type.
-#[doc(hidden)]
-pub trait Selfscriber<T> {
-    /// Name of the struct implementing [Selfscriber].
+/// Nodes must be organized by a [Manager], this is done by implementing a data structure
+/// containing various slots together with this trait.
+///
+/// A typical implementation may look like this:
+/// ```
+/// use revent::{Manager, Slot, Node};
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// struct MySlots {
+///     a: Slot<()>,
+///     b: Slot<()>,
+///     // more slots...
+///     manager: Rc<RefCell<Manager>>,
+/// }
+///
+/// impl Node for MySlots {
+///     fn manager(&self) -> &Rc<RefCell<Manager>> {
+///         &self.manager
+///     }
+/// }
+/// ```
+pub trait Node
+where
+    Self: Sized,
+{
+    /// Get the [Manager] of this node.
+    fn manager(&self) -> &Rc<RefCell<Manager>>;
+
+    /// Add a subscriber to this node.
     ///
-    /// Implemented bv the [node] macro.
-    fn name() -> &'static str;
-    /// TypeId of Self.
-    fn type_id() -> TypeId;
-    /// Inserts `item` in various signals in `T`.
-    fn selfscribe(holder: &mut T, item: Rc<RefCell<Self>>);
+    /// Uses [Subscriber::register] to figure out which slots to attach to.
+    fn subscribe<T>(&mut self, input: T::Input) -> Rc<RefCell<T>>
+    where
+        T: 'static + Subscriber<Self>,
+        T::Node: for<'a> From<&'a mut Self>,
+    {
+        let manager = self.manager().clone();
+        crate::STACK.with(|x| {
+            x.borrow_mut().push((Mode::Adding, manager.clone()));
+        });
+
+        manager
+            .borrow_mut()
+            .prepare_construction(T::NAME, TypeId::of::<T>());
+
+        let node = T::Node::from(self);
+        let item = Rc::new(RefCell::new(T::create(input, node)));
+        T::register(self, item.clone());
+
+        manager.borrow_mut().finish_construction();
+        crate::STACK.with(|x| {
+            x.borrow_mut().pop();
+        });
+        item
+    }
+
+    /// Remove a subscriber from this node.
+    ///
+    /// Uses [Subscriber::register] to figure out which slots to detach from.
+    fn unsubscribe<T>(&mut self, input: &Rc<RefCell<T>>)
+    where
+        T: 'static + Subscriber<Self>,
+    {
+        let manager = self.manager().clone();
+        crate::STACK.with(|x| {
+            x.borrow_mut().push((Mode::Removing, manager.clone()));
+        });
+
+        T::register(self, input.clone());
+
+        crate::STACK.with(|x| {
+            x.borrow_mut().pop();
+        });
+    }
 }
 
-/// Describes which internal node is used for `Self`.
-#[doc(hidden)]
-pub trait Nodified {
-    /// Intermediate signalling node type. Must be generated from [node].
-    type Node;
-}
-
-/// Describes how to build an object.
-pub trait Subscriber: Nodified {
-    /// Construction arguments to `Self`.
+/// Describes a subscriber that can subscribe to [Node].
+/// ```
+/// use revent::{Manager, Null, Slot, Node, Subscriber};
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// trait A {}
+///
+/// struct MySlots {
+///     a: Slot<A>,
+///     manager: Rc<RefCell<Manager>>,
+/// }
+///
+/// impl Node for MySlots {
+///     fn manager(&self) -> &Rc<RefCell<Manager>> {
+///         &self.manager
+///     }
+/// }
+///
+/// // ---
+///
+/// struct MyNode;
+///
+/// impl Subscriber<MySlots> for MyNode {
+///     type Input = ();
+///     type Node = Null;
+///
+///     fn create(input: Self::Input, node: Self::Node) -> Self {
+///         Self
+///     }
+///
+///     fn register(slots: &mut MySlots, item: Rc<RefCell<Self>>) {
+///         slots.a.register(item);
+///     }
+///
+///     const NAME: &'static str = "MyNode";
+/// }
+///
+/// impl A for MyNode {}
+/// ```
+pub trait Subscriber<H: Node> {
+    /// The type of input used to construct an instance of itself.
     type Input;
-    /// Build an instance of `Self`.
-    fn build(node: Self::Node, input: Self::Input) -> Self;
+    /// The type of the node it uses to further send signals to other [Slot](crate::Slot)s.
+    ///
+    /// May be [Null](crate::Null) if no further signals are sent from this subscriber.
+    type Node;
+    /// Create an instance of itself.
+    fn create(input: Self::Input, node: Self::Node) -> Self;
+    /// Register to various channels inside a [Node].
+    ///
+    /// Note that this function is used for both [subscribe](Node::subscribe) as well as
+    /// [unsubscribe](Node::unsubscribe). So this function ought to not depend on the state of the
+    /// item. If it does, then a subscriber may still be subscribed to some channels after
+    /// `unsubscribe` has been called.
+    fn register(hub: &mut H, item: Rc<RefCell<Self>>);
+
+    /// Name of the subscriber.
+    const NAME: &'static str;
 }
