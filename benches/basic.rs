@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use revent::Node;
 
 mod setup {
-    use revent::{Manager, Node, Slot, Subscriber};
+    use revent::{Manager, Named, Node, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     pub trait EventHandler {
@@ -38,7 +38,6 @@ mod setup {
     impl Subscriber<Hub> for MyEventHandler {
         type Input = ();
         type Node = revent::Null;
-        const NAME: &'static str = "MyEventHandler";
         fn create(_: Self::Input, _: Self::Node) -> Self {
             MyEventHandler
         }
@@ -46,6 +45,10 @@ mod setup {
         fn register(node: &mut Hub, item: Rc<RefCell<Self>>) {
             node.basic.register(item);
         }
+    }
+
+    impl Named for MyEventHandler {
+        const NAME: &'static str = "MyEventHandler";
     }
 }
 

@@ -1,4 +1,78 @@
-//! Allows
+//! Synchronous event system.
+//!
+//! # What is an event system? #
+//!
+//! An event system is a set of slots which contain objects. A signal is emitted on a slot, which
+//! will call each object in the slot. Invoked objects can then send more signals to different
+//! slots.
+//!
+//! # Synchronous #
+//!
+//! Revent's events are synchronous, meaning that emitting an event will immediately process all
+//! handlers in a slot. Once the function call returns, it is guaranteed that all listeners have
+//! been called.
+//!
+//! # Example #
+//!
+//! ```
+//! use revent::{Manager, Named, Node, Null, Slot, Subscriber};
+//! use std::{cell::RefCell, rc::Rc};
+//!
+//! trait BasicSignal {}
+//!
+//! struct Hub {
+//!     basic_slot: Slot<dyn BasicSignal>,
+//!     mng: Rc<RefCell<Manager>>,
+//! }
+//! impl Hub {
+//!     fn new() -> Self {
+//!         let mng = Rc::new(RefCell::new(Manager::default()));
+//!         Self {
+//!             basic_slot: Slot::new("basic_slot", mng.clone()),
+//!             mng,
+//!         }
+//!     }
+//! }
+//! impl Node for Hub {
+//!     fn manager(&self) -> &Rc<RefCell<Manager>> {
+//!         &self.mng
+//!     }
+//! }
+//!
+//! // ---
+//!
+//! struct MySubscriber;
+//! impl Subscriber<Hub> for MySubscriber {
+//!     type Input = ();
+//!     type Node = Null;
+//!
+//!     fn create(_: Self::Input, _: Self::Node) -> Self {
+//!         Self
+//!     }
+//!
+//!     fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+//!         hub.basic_slot.register(item);
+//!     }
+//! }
+//! impl Named for MySubscriber {
+//!     const NAME: &'static str = "MySubscriber";
+//! }
+//! impl BasicSignal for MySubscriber {}
+//!
+//! // ---
+//!
+//! let mut hub = Hub::new();
+//! let item = hub.subscribe::<MySubscriber>(());
+//! hub.basic_slot.emit(|x| {
+//!     println!("Called for each subscriber");
+//! });
+//! hub.unsubscribe(&item);
+//! ```
+//!
+//! # Mutable cycles #
+//!
+//! Revent performs cycle detection in [subscribe](crate::Node::subscribe) and ensures that no
+//! system exists in which we can create double mutable borrows.
 #![deny(
     missing_docs,
     trivial_casts,
@@ -11,10 +85,10 @@
 mod mng;
 mod slot;
 mod traits;
-pub(crate) use mng::Mode;
-pub use mng::{Grapher, Manager};
-pub use slot::Slot;
-pub use traits::{Node, Subscriber};
+pub(crate) use self::mng::Mode;
+pub use self::mng::{Grapher, Manager};
+pub use self::slot::Slot;
+pub use self::traits::{Named, Node, Subscriber};
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -41,7 +115,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 ///
 /// Use this when you want a subscriber that has no further signals to anything else.
 /// ```
-/// use revent::{Manager, Null, Slot, Node, Subscriber};
+/// use revent::{Manager, Named, Null, Slot, Node, Subscriber};
 /// use std::{cell::RefCell, rc::Rc};
 ///
 /// trait BasicSignal {}
@@ -79,7 +153,8 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 ///     fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
 ///         hub.basic_signal.register(item);
 ///     }
-///
+/// }
+/// impl Named for MySubscriber {
 ///     const NAME: &'static str = "MySubscriber";
 /// }
 /// impl BasicSignal for MySubscriber {}
@@ -94,7 +169,7 @@ impl<T> From<&mut T> for Null {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Manager, Node, Slot, Subscriber};
+    use crate::{Manager, Named, Node, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[quickcheck_macros::quickcheck]
@@ -141,7 +216,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
-
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl BasicSignal for MySubscriber {}
@@ -208,6 +284,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl BasicSignal for MySubscriber {}
@@ -267,6 +345,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl BasicSignal for MySubscriber {}
@@ -290,6 +370,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.other_signal.register(item);
             }
+        }
+        impl Named for OtherSubscriber {
             const NAME: &'static str = "OtherSubscriber";
         }
         impl OtherSignal for OtherSubscriber {}
@@ -343,6 +425,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl BasicSignal for MySubscriber {}
@@ -419,6 +503,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl BasicSignal for MySubscriber {}
@@ -464,6 +550,8 @@ mod tests {
                 Self
             }
             fn register(_: &mut Hub, _: Rc<RefCell<Self>>) {}
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
 

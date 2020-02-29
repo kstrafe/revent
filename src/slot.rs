@@ -1,5 +1,5 @@
 use crate::{assert_active_manager, Manager, Mode};
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 
 /// List of [Subscriber](crate::Subscriber)s to a signal `T`.
 ///
@@ -93,9 +93,28 @@ impl<T: ?Sized> Clone for Slot<T> {
     }
 }
 
+struct PointerWrapper<T: ?Sized>(Rc<RefCell<Vec<Rc<RefCell<T>>>>>);
+
+impl<T: ?Sized> fmt::Debug for PointerWrapper<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.borrow().iter().map(|x| x.as_ptr()))
+            .finish()
+    }
+}
+
+impl<T: ?Sized> fmt::Debug for Slot<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Slot")
+            .field("name", &self.name)
+            .field("subscribers", &PointerWrapper(self.subscribers.clone()))
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{Manager, Node, Slot, Subscriber};
+    use crate::{Manager, Named, Node, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
@@ -164,6 +183,8 @@ mod tests {
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
+        }
+        impl Named for MySubscriber {
             const NAME: &'static str = "MySubscriber";
         }
         impl Interface for MySubscriber {}

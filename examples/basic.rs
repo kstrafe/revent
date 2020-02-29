@@ -1,4 +1,4 @@
-use revent::{Manager, Node, Slot, Subscriber};
+use revent::{Manager, Named, Node, Slot, Subscriber};
 use std::{cell::RefCell, rc::Rc};
 
 // 1. Define your events using traits.
@@ -11,6 +11,7 @@ pub trait EventHandler {
 }
 
 // 2. Create an event node - a collection of event slots.
+#[derive(Debug)]
 struct Hub {
     basic: Slot<dyn EventHandler>,
     manager: Rc<RefCell<Manager>>,
@@ -55,7 +56,6 @@ fn main() {
     impl Subscriber<Hub> for MyEventHandler {
         type Input = ();
         type Node = revent::Null;
-        const NAME: &'static str = "MyEventHandler";
         fn create(_: Self::Input, _: Self::Node) -> Self {
             // We just construct the struct, no need to do anything special here in
             // this specific example.
@@ -64,8 +64,14 @@ fn main() {
 
         fn register(node: &mut Hub, item: Rc<RefCell<Self>>) {
             // Tells the hub node which slots to listen to.
+            // node.basic.register(item.clone());
             node.basic.register(item);
+            // node.basic.clone();
         }
+    }
+
+    impl Named for MyEventHandler {
+        const NAME: &'static str = "MyEventHandler";
     }
 
     // 6. Construct an instance inside the hub.
@@ -81,6 +87,8 @@ fn main() {
     hub.basic.emit(|x| {
         x.event();
     });
+
+    println!("{:#?}", hub);
 
     // 8. Remove the subscriber.
     //

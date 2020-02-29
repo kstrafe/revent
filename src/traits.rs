@@ -1,5 +1,5 @@
 use crate::{Manager, Mode};
-use std::{any::TypeId, cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 /// A collection of [Slot](crate::Slot)s to which [Subscriber]s can subscribe.
 ///
@@ -36,7 +36,7 @@ where
     /// Uses [Subscriber::register] to figure out which slots to attach to.
     fn subscribe<T>(&mut self, input: T::Input) -> Rc<RefCell<T>>
     where
-        T: 'static + Subscriber<Self>,
+        T: 'static + Named + Subscriber<Self>,
         T::Node: for<'a> From<&'a mut Self>,
     {
         let manager = self.manager().clone();
@@ -44,9 +44,7 @@ where
             x.borrow_mut().push((Mode::Adding, manager.clone()));
         });
 
-        manager
-            .borrow_mut()
-            .prepare_construction(T::NAME, TypeId::of::<T>());
+        manager.borrow_mut().prepare_construction(T::NAME);
 
         let node = T::Node::from(self);
         let item = Rc::new(RefCell::new(T::create(input, node)));
@@ -81,7 +79,7 @@ where
 
 /// Describes a subscriber that can subscribe to [Node].
 /// ```
-/// use revent::{Manager, Null, Slot, Node, Subscriber};
+/// use revent::{Manager, Named, Null, Slot, Node, Subscriber};
 /// use std::{cell::RefCell, rc::Rc};
 ///
 /// trait A {}
@@ -113,12 +111,14 @@ where
 ///         slots.a.register(item);
 ///     }
 ///
+/// }
+/// impl Named for MyNode {
 ///     const NAME: &'static str = "MyNode";
 /// }
 ///
 /// impl A for MyNode {}
 /// ```
-pub trait Subscriber<H: Node> {
+pub trait Subscriber<N: Node> {
     /// The type of input used to construct an instance of itself.
     type Input;
     /// The type of the node it uses to further send signals to other [Slot](crate::Slot)s.
@@ -133,8 +133,13 @@ pub trait Subscriber<H: Node> {
     /// [unsubscribe](Node::unsubscribe). So this function ought to not depend on the state of the
     /// item. If it does, then a subscriber may still be subscribed to some channels after
     /// `unsubscribe` has been called.
-    fn register(hub: &mut H, item: Rc<RefCell<Self>>);
+    fn register(hub: &mut N, item: Rc<RefCell<Self>>);
+}
 
-    /// Name of the subscriber.
+/// Attach a name to a type.
+pub trait Named {
+    /// Unique name of the subscriber.
+    ///
+    /// Used for figuring out recursions and graphing channel dependencies.
     const NAME: &'static str;
 }
