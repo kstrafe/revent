@@ -193,8 +193,7 @@ impl<'a> Display for RecursionPrinter<'a> {
 
 /// Wrapper around a [Manager] that generates a graph.
 pub struct Grapher<'a> {
-    /// The manager to use.
-    pub manager: &'a Manager,
+    manager: &'a Manager,
 }
 
 impl<'a> Grapher<'a> {

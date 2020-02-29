@@ -36,7 +36,7 @@ where
     /// Uses [Subscriber::register] to figure out which slots to attach to.
     fn subscribe<T>(&mut self, input: T::Input) -> Rc<RefCell<T>>
     where
-        T: 'static + Named + Subscriber<Self>,
+        T: Named + Subscriber<Self>,
         T::Node: for<'a> From<&'a mut Self>,
     {
         let manager = self.manager().clone();
@@ -62,7 +62,7 @@ where
     /// Uses [Subscriber::register] to figure out which slots to detach from.
     fn unsubscribe<T>(&mut self, input: &Rc<RefCell<T>>)
     where
-        T: 'static + Subscriber<Self>,
+        T: Subscriber<Self>,
     {
         let manager = self.manager().clone();
         crate::STACK.with(|x| {
