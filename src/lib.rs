@@ -83,12 +83,16 @@
 )]
 
 mod mng;
+mod single;
 mod slot;
 mod traits;
 pub(crate) use self::mng::Mode;
-pub use self::mng::{Grapher, Manager};
-pub use self::slot::Slot;
-pub use self::traits::{Named, Node, Subscriber};
+pub use self::{
+    mng::{Grapher, Manager},
+    single::Single,
+    slot::Slot,
+    traits::{Named, Node, Subscriber},
+};
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -161,8 +165,8 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 /// ```
 pub struct Null;
 
-impl<T> From<&mut T> for Null {
-    fn from(_: &mut T) -> Self {
+impl<T> From<&T> for Null {
+    fn from(_: &T) -> Self {
         Self
     }
 }
@@ -199,8 +203,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(_: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(_: &Hub) -> Self {
                 Self
             }
         }
@@ -268,8 +272,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(hub: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(hub: &Hub) -> Self {
                 let _ = hub.basic_signal.clone();
                 Self
             }
@@ -329,8 +333,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(hub: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(hub: &Hub) -> Self {
                 let _ = hub.other_signal.clone();
                 Self
             }
@@ -354,8 +358,8 @@ mod tests {
         // ---
 
         struct OtherSubscriberNode;
-        impl From<&mut Hub> for OtherSubscriberNode {
-            fn from(hub: &mut Hub) -> Self {
+        impl From<&Hub> for OtherSubscriberNode {
+            fn from(hub: &Hub) -> Self {
                 let _ = hub.basic_signal.clone();
                 Self
             }
@@ -410,8 +414,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(_: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(_: &Hub) -> Self {
                 Self
             }
         }
@@ -488,8 +492,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(_: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(_: &Hub) -> Self {
                 Self
             }
         }
@@ -537,8 +541,8 @@ mod tests {
         // ---
 
         struct MySubscriberNode;
-        impl From<&mut Hub> for MySubscriberNode {
-            fn from(_: &mut Hub) -> Self {
+        impl From<&Hub> for MySubscriberNode {
+            fn from(_: &Hub) -> Self {
                 Self
             }
         }

@@ -37,7 +37,7 @@ where
     fn subscribe<T>(&mut self, input: T::Input) -> Rc<RefCell<T>>
     where
         T: Named + Subscriber<Self>,
-        T::Node: for<'a> From<&'a mut Self>,
+        T::Node: for<'a> From<&'a Self>,
     {
         let manager = self.manager().clone();
         crate::STACK.with(|x| {

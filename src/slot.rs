@@ -13,7 +13,7 @@ pub struct Slot<T: ?Sized> {
 impl<T: ?Sized> Slot<T> {
     /// Create a new slot object.
     ///
-    /// The manager is used to organize multiple slot objects and to ensure that there are no
+    /// The manager is used to organize multiple single/slot objects and to ensure that there are no
     /// recursive (double mutable borrow) signal chains.
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
@@ -168,8 +168,8 @@ mod tests {
         // ---
 
         struct MyNode;
-        impl From<&mut Hub> for MyNode {
-            fn from(_: &mut Hub) -> MyNode {
+        impl From<&Hub> for MyNode {
+            fn from(_: &Hub) -> MyNode {
                 Self
             }
         }
