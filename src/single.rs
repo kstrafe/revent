@@ -2,7 +2,7 @@ use crate::{assert_active_manager, Manager, Mode};
 use std::{cell::RefCell, fmt, mem::replace, rc::Rc};
 
 /// Single [Subscriber](crate::Subscriber)s to a signal `T`.
-///m
+///
 /// A `single` is a container for a single subscriber. It ensures that a single subscriber always
 /// exists, panicking if not present on access. In addition, no more than a single subscriber may
 /// subscribe to this container at a time.
