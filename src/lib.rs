@@ -173,7 +173,7 @@ impl<T> From<&T> for Null {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Manager, Named, Node, Slot, Subscriber};
+    use crate::{Manager, Named, Node, Single, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[quickcheck_macros::quickcheck]
@@ -565,5 +565,14 @@ mod tests {
         let item = hub.subscribe::<MySubscriber>(());
         hub.unsubscribe(&item);
         hub.unsubscribe(&item);
+    }
+
+    #[test]
+    #[should_panic(expected = "revent name is already registered to this manager: signal")]
+    fn double_subscription() {
+        let mng = Rc::new(RefCell::new(Manager::default()));
+
+        Slot::<()>::new("signal", mng.clone());
+        Single::<()>::new("signal", mng);
     }
 }

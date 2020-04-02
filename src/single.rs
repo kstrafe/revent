@@ -1,7 +1,7 @@
 use crate::{assert_active_manager, Manager, Mode};
 use std::{cell::RefCell, fmt, mem::replace, rc::Rc};
 
-/// Single [Subscriber](crate::Subscriber)s to a signal `T`.
+/// Single [Subscriber](crate::Subscriber) to a signal `T`.
 ///
 /// A `single` is a container for a single subscriber. It ensures that a single subscriber always
 /// exists, panicking if not present on access. In addition, no more than a single subscriber may
@@ -20,6 +20,7 @@ impl<T: ?Sized> Single<T> {
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
     pub fn new(name: &'static str, manager: Rc<RefCell<Manager>>) -> Self {
+        manager.borrow_mut().ensure_new(name);
         Self {
             manager,
             name,
@@ -271,5 +272,14 @@ mod tests {
         // ---
 
         hub.signal_a.emit(|_| {});
+    }
+
+    #[test]
+    #[should_panic(expected = "revent name is already registered to this manager: signal")]
+    fn double_subscription() {
+        let mng = Rc::new(RefCell::new(Manager::default()));
+
+        Single::<()>::new("signal", mng.clone());
+        Single::<()>::new("signal", mng);
     }
 }

@@ -41,6 +41,15 @@ impl Manager {
         Self::default()
     }
 
+    pub(crate) fn ensure_new(&mut self, name: &'static str) {
+        assert!(
+            !self.emitters.contains_key(name),
+            "revent name is already registered to this manager: {}",
+            name
+        );
+        self.emitters.insert(name, Default::default());
+    }
+
     pub(crate) fn prepare_construction(&mut self, name: &'static str) {
         self.active.push(ListensAndEmits {
             name,

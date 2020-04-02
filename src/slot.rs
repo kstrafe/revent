@@ -18,6 +18,7 @@ impl<T: ?Sized> Slot<T> {
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
     pub fn new(name: &'static str, manager: Rc<RefCell<Manager>>) -> Self {
+        manager.borrow_mut().ensure_new(name);
         Self {
             manager,
             name,
@@ -33,6 +34,19 @@ impl<T: ?Sized> Slot<T> {
         for item in self.subscribers.borrow_mut().iter_mut() {
             let mut item = item.borrow_mut();
             caller(&mut *item);
+        }
+    }
+
+    /// Continue emitting only if the caller returns `true`. Stops if `false`.
+    pub fn emit_short<F>(&mut self, mut caller: F)
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        for item in self.subscribers.borrow_mut().iter_mut() {
+            let mut item = item.borrow_mut();
+            if !caller(&mut *item) {
+                break;
+            }
         }
     }
 
@@ -190,5 +204,14 @@ mod tests {
         impl Interface for MySubscriber {}
 
         hub.subscribe::<MySubscriber>(());
+    }
+
+    #[test]
+    #[should_panic(expected = "revent name is already registered to this manager: signal")]
+    fn double_subscription() {
+        let mng = Rc::new(RefCell::new(Manager::default()));
+
+        Slot::<()>::new("signal", mng.clone());
+        Slot::<()>::new("signal", mng);
     }
 }
