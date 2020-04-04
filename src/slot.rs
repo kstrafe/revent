@@ -64,8 +64,8 @@ impl<T: ?Sized> Slot<T> {
 
     /// Add or remove a subscriber object to this slot.
     ///
-    /// The action taken depends on whether [Node::subscribe](crate::Node::subscribe) or
-    /// [Node::unsubscribe](crate::Node::unsubscribe) was called.
+    /// The action taken depends on whether [Anchor::subscribe](crate::Anchor::subscribe) or
+    /// [Anchor::unsubscribe](crate::Anchor::unsubscribe) was called.
     ///
     /// When adding: pushes the item to the end of the list. See [sort_by](Slot::sort_by) if a different order is
     /// desired.
@@ -128,11 +128,11 @@ impl<T: ?Sized> fmt::Debug for Slot<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Manager, Named, Node, Slot, Subscriber};
+    use crate::{Anchor, Manager, Named, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Node context")]
+    #[should_panic(expected = "revent signal modification outside of Hub context")]
     fn using_signal_push_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Node context")]
+    #[should_panic(expected = "revent signal modification outside of Hub context")]
     fn using_signal_clone_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -173,7 +173,7 @@ mod tests {
             manager: Rc::new(RefCell::new(Manager::default())),
         };
 
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -190,8 +190,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MyNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MyNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {

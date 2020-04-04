@@ -37,8 +37,8 @@ mod setup {
 
     impl Subscriber<Hub> for MyEventHandler {
         type Input = ();
-        type Node = revent::Null;
-        fn create(_: Self::Input, _: Self::Node) -> Self {
+        type Outputs = revent::Null;
+        fn create(_: Self::Input, _: Self::Outputs) -> Self {
             MyEventHandler
         }
 
@@ -54,14 +54,14 @@ mod setup {
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("empty emit", |b| {
-        let mut hub = setup::Hub::new();
+        let mut hub = setup::Anchor::new();
         b.iter(|| {
             hub.basic.emit(|_| {});
         });
     });
 
     c.bench_function("single emit", |b| {
-        let mut hub = setup::Hub::new();
+        let mut hub = setup::Anchor::new();
         hub.subscribe::<setup::MyEventHandler>(());
         b.iter(|| {
             hub.basic.emit(|x| x.event());
@@ -69,7 +69,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("many emit", |b| {
-        let mut hub = setup::Hub::new();
+        let mut hub = setup::Anchor::new();
         for _ in 0..1000 {
             hub.subscribe::<setup::MyEventHandler>(());
         }
@@ -79,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("subscribe and remove", |b| {
-        let mut hub = setup::Hub::new();
+        let mut hub = setup::Anchor::new();
         b.iter(|| {
             let mut items = (0..1000)
                 .map(|_| hub.subscribe::<setup::MyEventHandler>(()))

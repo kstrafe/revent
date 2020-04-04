@@ -1,4 +1,4 @@
-use revent::{Manager, Named, Node, Slot, Subscriber};
+use revent::{Anchor, Manager, Named, Slot, Subscriber};
 use std::{cell::RefCell, rc::Rc};
 
 // 1. Define your events using traits.
@@ -18,7 +18,7 @@ struct Hub {
 }
 
 // 2a. The node only needs to implement `manager`.
-impl Node for Hub {
+impl Anchor for Hub {
     fn manager(&self) -> &Rc<RefCell<Manager>> {
         &self.manager
     }
@@ -55,8 +55,8 @@ fn main() {
     // ensures that we don't have any recursive subscriptions.
     impl Subscriber<Hub> for MyEventHandler {
         type Input = ();
-        type Node = revent::Null;
-        fn create(_: Self::Input, _: Self::Node) -> Self {
+        type Outputs = revent::Null;
+        fn create(_: Self::Input, _: Self::Outputs) -> Self {
             // We just construct the struct, no need to do anything special here in
             // this specific example.
             MyEventHandler

@@ -15,7 +15,7 @@
 //! # Example #
 //!
 //! ```
-//! use revent::{Manager, Named, Node, Null, Slot, Subscriber};
+//! use revent::{Anchor, Manager, Named, Null, Slot, Subscriber};
 //! use std::{cell::RefCell, rc::Rc};
 //!
 //! trait BasicSignal {}
@@ -33,7 +33,7 @@
 //!         }
 //!     }
 //! }
-//! impl Node for Hub {
+//! impl Anchor for Hub {
 //!     fn manager(&self) -> &Rc<RefCell<Manager>> {
 //!         &self.mng
 //!     }
@@ -44,9 +44,9 @@
 //! struct MySubscriber;
 //! impl Subscriber<Hub> for MySubscriber {
 //!     type Input = ();
-//!     type Node = Null;
+//!     type Outputs = Null;
 //!
-//!     fn create(_: Self::Input, _: Self::Node) -> Self {
+//!     fn create(_: Self::Input, _: Self::Outputs) -> Self {
 //!         Self
 //!     }
 //!
@@ -69,10 +69,29 @@
 //! hub.unsubscribe(&item);
 //! ```
 //!
-//! # Mutable cycles #
+//! ## Mutable cycles ##
 //!
-//! Revent performs cycle detection in [subscribe](crate::Node::subscribe) and ensures that no
+//! Revent performs cycle detection in [subscribe](crate::Anchor::subscribe) and ensures that no
 //! system exists in which we can create double mutable borrows.
+//!
+//! # Core Concepts #
+//!
+//! An event system based on revent has 2 core concepts:
+//!
+//! * Hub
+//! * Subscribers
+//!
+//! ## Hub
+//!
+//! A hub contains all event [Slot]s and [Single]s in the system. It also contains a [Manager] and
+//! implements [Hub]. We register new [Subscriber]s in a hub, and the subscribers will themselves
+//! choose which slots/singles to listen or emit to.
+//!
+//! ## Subscribers ##
+//!
+//! Subscribers are classes that implement `Subscriber<Hub>`. They specify their interest in
+//! signals to listen for by `register`. They specify their singles/slots to emit to via `type
+//! Node`.
 #![deny(
     missing_docs,
     trivial_casts,
@@ -91,7 +110,7 @@ pub use self::{
     mng::{Grapher, Manager},
     single::Single,
     slot::Slot,
-    traits::{Named, Node, Subscriber},
+    traits::{Anchor, Named, Subscriber},
 };
 
 use std::{cell::RefCell, rc::Rc};
@@ -106,7 +125,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
             Rc::ptr_eq(
                 &x.borrow()
                     .last()
-                    .expect("revent signal modification outside of Node context")
+                    .expect("revent signal modification outside of Hub context")
                     .1,
                 manager
             ),
@@ -119,7 +138,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 ///
 /// Use this when you want a subscriber that has no further signals to anything else.
 /// ```
-/// use revent::{Manager, Named, Null, Slot, Node, Subscriber};
+/// use revent::{Anchor, Manager, Named, Null, Slot, Subscriber};
 /// use std::{cell::RefCell, rc::Rc};
 ///
 /// trait BasicSignal {}
@@ -137,7 +156,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 ///         }
 ///     }
 /// }
-/// impl Node for Hub {
+/// impl Anchor for Hub {
 ///     fn manager(&self) -> &Rc<RefCell<Manager>> {
 ///         &self.mng
 ///     }
@@ -148,9 +167,9 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 /// struct MySubscriber;
 /// impl Subscriber<Hub> for MySubscriber {
 ///     type Input = ();
-///     type Node = Null;
+///     type Outputs = Null;
 ///
-///     fn create(_: Self::Input, _: Self::Node) -> Self {
+///     fn create(_: Self::Input, _: Self::Outputs) -> Self {
 ///         Self
 ///     }
 ///
@@ -173,7 +192,7 @@ impl<T> From<&T> for Null {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Manager, Named, Node, Single, Slot, Subscriber};
+    use crate::{Anchor, Manager, Named, Single, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[quickcheck_macros::quickcheck]
@@ -194,7 +213,7 @@ mod tests {
                 }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -211,9 +230,9 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
+            type Outputs = MySubscriberNode;
 
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
 
@@ -263,7 +282,7 @@ mod tests {
                 }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -281,8 +300,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MySubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
@@ -324,7 +343,7 @@ mod tests {
                 }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -342,8 +361,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MySubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
@@ -367,8 +386,8 @@ mod tests {
         struct OtherSubscriber;
         impl Subscriber<Hub> for OtherSubscriber {
             type Input = ();
-            type Node = OtherSubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = OtherSubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
@@ -405,7 +424,7 @@ mod tests {
                 }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -422,8 +441,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MySubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
@@ -483,7 +502,7 @@ mod tests {
                 }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -500,8 +519,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MySubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
@@ -532,7 +551,7 @@ mod tests {
                 Self { mng }
             }
         }
-        impl Node for Hub {
+        impl Anchor for Hub {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.mng
             }
@@ -549,8 +568,8 @@ mod tests {
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
             type Input = ();
-            type Node = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Node) -> Self {
+            type Outputs = MySubscriberNode;
+            fn create(_: Self::Input, _: Self::Outputs) -> Self {
                 Self
             }
             fn register(_: &mut Hub, _: Rc<RefCell<Self>>) {}
