@@ -46,8 +46,8 @@ impl<T: ?Sized> Single<T> {
 
     /// Add or remove a subscriber object to this single.
     ///
-    /// The action taken depends on whether [Node::subscribe](crate::Node::subscribe) or
-    /// [Node::unsubscribe](crate::Node::unsubscribe) was called.
+    /// The action taken depends on whether [Anchor::subscribe](crate::Anchor::subscribe) or
+    /// [Anchor::unsubscribe](crate::Anchor::unsubscribe) was called.
     pub fn register(&mut self, item: Rc<RefCell<T>>) {
         assert_active_manager(&self.manager);
         let mut mng = self.manager.borrow_mut();
@@ -75,7 +75,7 @@ impl<T: ?Sized> Single<T> {
 }
 
 impl<T: ?Sized> Clone for Single<T> {
-    /// Cloning is only valid from within a [Node::subscribe](crate::Node::subscribe) context.
+    /// Cloning is only valid from within an [Anchor::subscribe](crate::Anchor::subscribe) context.
     fn clone(&self) -> Self {
         assert_active_manager(&self.manager);
         self.manager.borrow_mut().register_emit(self.name);
@@ -113,7 +113,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Hub context")]
+    #[should_panic(expected = "revent signal modification outside of Anchor context")]
     fn using_signal_push_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Hub context")]
+    #[should_panic(expected = "revent signal modification outside of Anchor context")]
     fn using_signal_clone_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -170,11 +170,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MyNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MyNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
@@ -184,7 +180,7 @@ mod tests {
         }
         impl Interface for MySubscriber {}
 
-        hub.subscribe::<MySubscriber>(());
+        hub.subscribe(|_| MySubscriber);
     }
 
     #[test]
@@ -224,11 +220,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MyNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MyNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
@@ -238,8 +230,8 @@ mod tests {
         }
         impl Interface for MySubscriber {}
 
-        hub.subscribe::<MySubscriber>(());
-        hub.subscribe::<MySubscriber>(());
+        hub.subscribe(|_| MySubscriber);
+        hub.subscribe(|_| MySubscriber);
     }
 
     #[test]

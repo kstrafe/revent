@@ -43,12 +43,7 @@
 //!
 //! struct MySubscriber;
 //! impl Subscriber<Hub> for MySubscriber {
-//!     type Input = ();
-//!     type Outputs = Null;
-//!
-//!     fn create(_: Self::Input, _: Self::Outputs) -> Self {
-//!         Self
-//!     }
+//!     type Emitter = Null;
 //!
 //!     fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
 //!         hub.basic_slot.register(item);
@@ -62,7 +57,7 @@
 //! // ---
 //!
 //! let mut hub = Hub::new();
-//! let item = hub.subscribe::<MySubscriber>(());
+//! let item = hub.subscribe(|_| MySubscriber);
 //! hub.basic_slot.emit(|x| {
 //!     println!("Called for each subscriber");
 //! });
@@ -76,22 +71,113 @@
 //!
 //! # Core Concepts #
 //!
-//! An event system based on revent has 2 core concepts:
+//! An event system based on revent has 3 core concepts:
 //!
-//! * Hub
+//! * Anchors
+//! * Emitters
 //! * Subscribers
 //!
-//! ## Hub
+//! ## Anchor ##
 //!
-//! A hub contains all event [Slot]s and [Single]s in the system. It also contains a [Manager] and
-//! implements [Hub]. We register new [Subscriber]s in a hub, and the subscribers will themselves
-//! choose which slots/singles to listen or emit to.
+//! An anchor contains all event [Slot]s and [Single]s in the system. It also contains a [Manager] and
+//! implements [Anchor]. We register new [Subscriber]s to an anchor, and the subscribers will themselves
+//! choose which slots/singles to listen or emit to. Only anchors can be subscribed to.
 //!
-//! ## Subscribers ##
+//! ## Subscriber ##
 //!
-//! Subscribers are classes that implement `Subscriber<Hub>`. They specify their interest in
-//! signals to listen for by `register`. They specify their singles/slots to emit to via `type
-//! Node`.
+//! Subscribers are classes that implement `Subscriber<A: Anchor>`. They specify their interest in
+//! signals to listen to by `fn register`. They specify their singles/slots to emit to via `type
+//! Emitter`.
+//!
+//! ## Emitter ##
+//!
+//! Each subscriber has an associated [Emitter](crate::Subscriber::Emitter). An emitter contains a list of singles and slots
+//! based on the `Anchor` of its subscriber. Emitters simply implement [From] for `&Anchor` which
+//! clones singles and slots from a particular anchor.
+//!
+//! # Example with Emitter #
+//!
+//! ```
+//! use revent::{Anchor, Manager, Named, Null, Slot, Subscriber};
+//! use std::{cell::RefCell, rc::Rc};
+//!
+//! // First let's crate a hub (Anchor) that contains two signals.
+//!
+//! trait BasicSignal {
+//!     fn basic(&mut self);
+//! }
+//!
+//! struct Hub {
+//!     basic_slot_1: Slot<dyn BasicSignal>,
+//!     basic_slot_2: Slot<dyn BasicSignal>,
+//!     mng: Rc<RefCell<Manager>>,
+//! }
+//! impl Hub {
+//!     fn new() -> Self {
+//!         let mng = Rc::new(RefCell::new(Manager::default()));
+//!         Self {
+//!             basic_slot_1: Slot::new("basic_slot_1", mng.clone()),
+//!             basic_slot_2: Slot::new("basic_slot_2", mng.clone()),
+//!             mng,
+//!         }
+//!     }
+//! }
+//! impl Anchor for Hub {
+//!     fn manager(&self) -> &Rc<RefCell<Manager>> {
+//!         &self.mng
+//!     }
+//! }
+//!
+//! // ---
+//!
+//! // Now we define our emitter structure, this one contains only `basic_slot_2`, which indicates
+//! // that we want to emit only to this slot for the subscribers using it as their emitter.
+//!
+//! struct MyEmitter {
+//!     basic_slot_2: Slot<dyn BasicSignal>,
+//! }
+//!
+//! impl From<&Hub> for MyEmitter {
+//!     fn from(item: &Hub) -> Self {
+//!         Self {
+//!             basic_slot_2: item.basic_slot_2.clone(),
+//!         }
+//!     }
+//! }
+//!
+//! // ---
+//!
+//! // Create a subscriber that uses MyEmitter (emits on `basic_slot_2`), and listens on
+//! // `basic_slot_1`.
+//!
+//! struct MySubscriber { emitter: MyEmitter }
+//! impl Subscriber<Hub> for MySubscriber {
+//!     // Indicate which emitter we want to use.
+//!     type Emitter = MyEmitter;
+//!
+//!     fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+//!         hub.basic_slot_1.register(item);
+//!     }
+//! }
+//! impl Named for MySubscriber {
+//!     const NAME: &'static str = "MySubscriber";
+//! }
+//!
+//! // Whenever we get a basic signal we pass it to the emitter.
+//! impl BasicSignal for MySubscriber {
+//!     fn basic(&mut self) {
+//!         self.emitter.basic_slot_2.emit(|_| println!("Hello world"));
+//!     }
+//! }
+//!
+//! // ---
+//!
+//! let mut hub = Hub::new();
+//! let item = hub.subscribe(|emitter| MySubscriber { emitter });
+//! hub.basic_slot_1.emit(BasicSignal::basic);
+//! hub.unsubscribe(&item);
+//! ```
+//!
 #![deny(
     missing_docs,
     trivial_casts,
@@ -125,7 +211,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
             Rc::ptr_eq(
                 &x.borrow()
                     .last()
-                    .expect("revent signal modification outside of Hub context")
+                    .expect("revent signal modification outside of Anchor context")
                     .1,
                 manager
             ),
@@ -166,12 +252,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 ///
 /// struct MySubscriber;
 /// impl Subscriber<Hub> for MySubscriber {
-///     type Input = ();
-///     type Outputs = Null;
-///
-///     fn create(_: Self::Input, _: Self::Outputs) -> Self {
-///         Self
-///     }
+///     type Emitter = Null;
 ///
 ///     fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
 ///         hub.basic_signal.register(item);
@@ -229,12 +310,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
 
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
@@ -250,7 +326,7 @@ mod tests {
         let mut hub = Hub::new();
 
         for _ in 0..value {
-            hub.subscribe::<MySubscriber>(());
+            hub.subscribe(|_| MySubscriber);
         }
 
         let mut count = 0;
@@ -299,11 +375,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
@@ -317,7 +389,7 @@ mod tests {
 
         let mut hub = Hub::new();
 
-        hub.subscribe::<MySubscriber>(());
+        hub.subscribe(|_| MySubscriber);
     }
 
     #[test]
@@ -360,11 +432,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
@@ -385,11 +453,7 @@ mod tests {
         }
         struct OtherSubscriber;
         impl Subscriber<Hub> for OtherSubscriber {
-            type Input = ();
-            type Outputs = OtherSubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = OtherSubscriberNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.other_signal.register(item);
             }
@@ -403,8 +467,8 @@ mod tests {
 
         let mut hub = Hub::new();
 
-        hub.subscribe::<MySubscriber>(());
-        hub.subscribe::<OtherSubscriber>(());
+        hub.subscribe(|_| MySubscriber);
+        hub.subscribe(|_| OtherSubscriber);
     }
 
     #[quickcheck_macros::quickcheck]
@@ -440,11 +504,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
@@ -460,7 +520,7 @@ mod tests {
 
         let mut items = Vec::with_capacity(subscribes);
         for _ in 0..subscribes {
-            items.push(hub.subscribe::<MySubscriber>(()));
+            items.push(hub.subscribe(|_| MySubscriber));
         }
 
         {
@@ -518,11 +578,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
             fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
             }
@@ -535,7 +591,7 @@ mod tests {
         // ---
 
         let mut hub = Hub::new();
-        let item = hub.subscribe::<MySubscriber>(());
+        let item = hub.subscribe(|_| MySubscriber);
         hub.unsubscribe(&item);
         hub.unsubscribe(&item);
     }
@@ -567,11 +623,7 @@ mod tests {
         }
         struct MySubscriber;
         impl Subscriber<Hub> for MySubscriber {
-            type Input = ();
-            type Outputs = MySubscriberNode;
-            fn create(_: Self::Input, _: Self::Outputs) -> Self {
-                Self
-            }
+            type Emitter = MySubscriberNode;
             fn register(_: &mut Hub, _: Rc<RefCell<Self>>) {}
         }
         impl Named for MySubscriber {
@@ -581,7 +633,7 @@ mod tests {
         // ---
 
         let mut hub = Hub::new();
-        let item = hub.subscribe::<MySubscriber>(());
+        let item = hub.subscribe(|_| MySubscriber);
         hub.unsubscribe(&item);
         hub.unsubscribe(&item);
     }

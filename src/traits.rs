@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 
 /// A collection of [Slot](crate::Slot)s and [Single](crate::Single)s to which [Subscriber]s can subscribe.
 ///
-/// Hubs must be organized by a [Manager], this is done by implementing a data structure
+/// Anchors must be organized by a [Manager], this is done by implementing a data structure
 /// containing various slots together with this trait.
 ///
 /// A typical implementation may look like this:
@@ -28,16 +28,17 @@ pub trait Anchor
 where
     Self: Sized,
 {
-    /// Get the [Manager] of this hub.
+    /// Get the [Manager] of this anchor.
     fn manager(&self) -> &Rc<RefCell<Manager>>;
 
-    /// Add a subscriber to this hub.
+    /// Add a subscriber to this anchor.
     ///
     /// Uses [Subscriber::register] to figure out which slots to attach to.
-    fn subscribe<T>(&mut self, input: T::Input) -> Rc<RefCell<T>>
+    fn subscribe<T, F>(&mut self, create: F) -> Rc<RefCell<T>>
     where
         T: Named + Subscriber<Self>,
-        T::Outputs: for<'a> From<&'a Self>,
+        T::Emitter: for<'a> From<&'a Self>,
+        F: FnOnce(T::Emitter) -> T,
     {
         let manager = self.manager().clone();
         crate::STACK.with(|x| {
@@ -46,8 +47,8 @@ where
 
         manager.borrow_mut().prepare_construction(T::NAME);
 
-        let hub = T::Outputs::from(self);
-        let item = Rc::new(RefCell::new(T::create(input, hub)));
+        let emitter = T::Emitter::from(self);
+        let item = Rc::new(RefCell::new(create(emitter)));
         T::register(self, item.clone());
 
         manager.borrow_mut().finish_construction();
@@ -57,7 +58,7 @@ where
         item
     }
 
-    /// Remove a subscriber from this hub.
+    /// Remove a subscriber from this anchor.
     ///
     /// Uses [Subscriber::register] to figure out which slots to detach from.
     fn unsubscribe<T>(&mut self, input: &Rc<RefCell<T>>)
@@ -77,7 +78,7 @@ where
     }
 }
 
-/// Describes a subscriber that can subscribe to [Hub].
+/// Describes a subscriber that can subscribe to [Anchor].
 /// ```
 /// use revent::{Anchor, Manager, Named, Null, Slot, Subscriber};
 /// use std::{cell::RefCell, rc::Rc};
@@ -100,12 +101,7 @@ where
 /// struct MyNode;
 ///
 /// impl Subscriber<MySlots> for MyNode {
-///     type Input = ();
-///     type Outputs = Null;
-///
-///     fn create(input: Self::Input, node: Self::Outputs) -> Self {
-///         Self
-///     }
+///     type Emitter = Null;
 ///
 ///     fn register(slots: &mut MySlots, item: Rc<RefCell<Self>>) {
 ///         slots.a.register(item);
@@ -118,22 +114,18 @@ where
 ///
 /// impl A for MyNode {}
 /// ```
-pub trait Subscriber<N: Anchor> {
-    /// The type of input used to construct an instance of itself.
-    type Input;
+pub trait Subscriber<A: Anchor> {
     /// The type of the node it uses to further send signals to other [Slot](crate::Slot)s.
     ///
     /// May be [Null](crate::Null) if no further signals are sent from this subscriber.
-    type Outputs;
-    /// Create an instance of itself.
-    fn create(input: Self::Input, hub: Self::Outputs) -> Self;
-    /// Register to various channels inside a [Anchor].
+    type Emitter;
+    /// Register to various channels inside an [Anchor].
     ///
     /// Note that this function is used for both [subscribe](Anchor::subscribe) as well as
     /// [unsubscribe](Anchor::unsubscribe). So this function ought to not depend on the state of the
     /// item. If it does, then a subscriber may still be subscribed to some channels after
     /// `unsubscribe` has been called.
-    fn register(hub: &mut N, item: Rc<RefCell<Self>>);
+    fn register(anchor: &mut A, item: Rc<RefCell<Self>>);
 }
 
 /// Attach a name to a type.

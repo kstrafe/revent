@@ -22,7 +22,7 @@ struct ListensAndEmits {
 /// Inspects how various [Subscriber](crate::Subscriber)s use [Slot](crate::Slot)s.
 ///
 /// Will [panic] if there exists any subscriber cycle. Cycle detection occurs only during
-/// [Node::subscribe](crate::Node::subscribe). Emitting will not perform any cycle detection.
+/// [Anchor::subscribe](crate::Anchor::subscribe). Emitting will not perform any cycle detection.
 ///
 /// Unsubscribing items does not remove the channel dependencies from the manager. This is
 /// intentional to discourage juggling subscriptions to fit the dependency chain.

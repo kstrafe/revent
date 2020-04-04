@@ -54,14 +54,7 @@ fn main() {
     // Subscriber informs the hub how to build and subscribe the type to slots. It also
     // ensures that we don't have any recursive subscriptions.
     impl Subscriber<Hub> for MyEventHandler {
-        type Input = ();
-        type Outputs = revent::Null;
-        fn create(_: Self::Input, _: Self::Outputs) -> Self {
-            // We just construct the struct, no need to do anything special here in
-            // this specific example.
-            MyEventHandler
-        }
-
+        type Emitter = revent::Null;
         fn register(node: &mut Hub, item: Rc<RefCell<Self>>) {
             // Tells the hub node which slots to listen to.
             // node.basic.register(item.clone());
@@ -75,7 +68,7 @@ fn main() {
     }
 
     // 6. Construct an instance inside the hub.
-    let item = hub.subscribe::<MyEventHandler>(());
+    let item = hub.subscribe(|_| MyEventHandler);
 
     // 7. Emit events.
     //
