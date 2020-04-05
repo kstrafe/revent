@@ -1,15 +1,15 @@
 use crate::{assert_active_manager, Manager, Mode};
 use std::{cell::RefCell, fmt, mem::replace, rc::Rc};
 
-/// Single [Subscriber](crate::Subscriber) to a signal `T`.
+/// Single slot containing `T`.
 ///
-/// A `single` is a container for a single subscriber. It ensures that a single subscriber always
-/// exists, panicking if not present on access. In addition, no more than a single subscriber may
+/// A `single` is a container for a single [Node](crate::Node). It ensures that a single node always
+/// exists, panicking if not present on access. In addition, no more than a single node may
 /// subscribe to this container at a time.
 pub struct Single<T: ?Sized> {
     manager: Rc<RefCell<Manager>>,
     name: &'static str,
-    subscriber: Rc<RefCell<Option<Rc<RefCell<T>>>>>,
+    node: Rc<RefCell<Option<Rc<RefCell<T>>>>>,
 }
 
 impl<T: ?Sized> Single<T> {
@@ -24,27 +24,27 @@ impl<T: ?Sized> Single<T> {
         Self {
             manager,
             name,
-            subscriber: Rc::new(RefCell::new(None)),
+            node: Rc::new(RefCell::new(None)),
         }
     }
 
     /// Emit a signal on this signal single.
     ///
-    /// Panics if no subscriber is subscribed to this single.
+    /// Panics if no node is subscribed to this single.
     pub fn emit<F, R>(&mut self, mut caller: F) -> R
     where
         F: FnMut(&mut T) -> R,
     {
-        let mut item = self.subscriber.borrow_mut();
+        let mut item = self.node.borrow_mut();
 
         if let Some(item) = &mut *item {
             caller(&mut item.borrow_mut())
         } else {
-            panic!("revent: no subscriber in {:?}", self.name)
+            panic!("revent: no node in {:?}", self.name)
         }
     }
 
-    /// Add or remove a subscriber object to this single.
+    /// Add or remove a node object to this single.
     ///
     /// The action taken depends on whether [Anchor::subscribe](crate::Anchor::subscribe) or
     /// [Anchor::unsubscribe](crate::Anchor::unsubscribe) was called.
@@ -65,14 +65,14 @@ impl<T: ?Sized> Single<T> {
                 Mode::Adding => {
                     mng.register_subscribe(self.name);
                     assert!(
-                        replace(&mut *self.subscriber.borrow_mut(), Some(item)).is_none(),
+                        replace(&mut *self.node.borrow_mut(), Some(item)).is_none(),
                         "revent: unable to register multiple items simultaneously: {:?}",
                         self.name
                     );
                 }
                 Mode::Removing => {
                     assert!(
-                        replace(&mut *self.subscriber.borrow_mut(), None).is_some(),
+                        replace(&mut *self.node.borrow_mut(), None).is_some(),
                         "revent: unable to deregister nonexistent item: {:?}",
                         self.name
                     );
@@ -90,7 +90,7 @@ impl<T: ?Sized> Clone for Single<T> {
         Self {
             manager: self.manager.clone(),
             name: self.name,
-            subscriber: self.subscriber.clone(),
+            node: self.node.clone(),
         }
     }
 }
@@ -110,14 +110,14 @@ impl<T: ?Sized> fmt::Debug for Single<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Single")
             .field("name", &self.name)
-            .field("subscribers", &PointerWrapper(self.subscriber.clone()))
+            .field("node", &PointerWrapper(self.node.clone()))
             .finish()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Emit, Manager, Named, Single, Subscriber};
+    use crate::{Anchor, Manager, Node, Single};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
@@ -152,17 +152,17 @@ mod tests {
 
         // ---
 
-        struct Hub {
+        struct MyAnchor {
             signal_a: Single<dyn Interface>,
             manager: Rc<RefCell<Manager>>,
         }
 
-        let mut hub = Hub {
+        let mut hub = MyAnchor {
             signal_a: Single::new("signal_a", Rc::new(RefCell::new(Manager::default()))),
             manager: Rc::new(RefCell::new(Manager::default())),
         };
 
-        impl Anchor for Hub {
+        impl Anchor for MyAnchor {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -170,25 +170,20 @@ mod tests {
 
         // ---
 
+        struct MyEmitter;
         struct MyNode;
-        impl Emit<Hub> for MyNode {
-            fn create(_: &Hub) -> MyNode {
-                Self
+        impl Node<MyAnchor, MyEmitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> MyEmitter {
+                MyEmitter
             }
-        }
-        struct MySubscriber;
-        impl Subscriber<Hub> for MySubscriber {
-            type Emitter = MyNode;
-            fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
+            const NAME: &'static str = "MyNode";
         }
-        impl Named for MySubscriber {
-            const NAME: &'static str = "MySubscriber";
-        }
-        impl Interface for MySubscriber {}
+        impl Interface for MyNode {}
 
-        hub.subscribe(|_| MySubscriber);
+        hub.subscribe(|_| MyNode);
     }
 
     #[test]
@@ -201,20 +196,20 @@ mod tests {
 
         // ---
 
-        struct Hub {
+        struct MyAnchor {
             signal_a: Single<dyn Interface>,
             manager: Rc<RefCell<Manager>>,
         }
 
         let mut hub = {
             let manager = Rc::new(RefCell::new(Manager::default()));
-            Hub {
+            MyAnchor {
                 signal_a: Single::new("signal_a", manager.clone()),
                 manager,
             }
         };
 
-        impl Anchor for Hub {
+        impl Anchor for MyAnchor {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -222,50 +217,45 @@ mod tests {
 
         // ---
 
+        struct MyEmitter;
         struct MyNode;
-        impl Emit<Hub> for MyNode {
-            fn create(_: &Hub) -> MyNode {
-                Self
+        impl Node<MyAnchor, MyEmitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> MyEmitter {
+                MyEmitter
             }
-        }
-        struct MySubscriber;
-        impl Subscriber<Hub> for MySubscriber {
-            type Emitter = MyNode;
-            fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
+            const NAME: &'static str = "MyNode";
         }
-        impl Named for MySubscriber {
-            const NAME: &'static str = "MySubscriber";
-        }
-        impl Interface for MySubscriber {}
+        impl Interface for MyNode {}
 
-        hub.subscribe(|_| MySubscriber);
-        hub.subscribe(|_| MySubscriber);
+        hub.subscribe(|_| MyNode);
+        hub.subscribe(|_| MyNode);
     }
 
     #[test]
-    #[should_panic(expected = "revent: no subscriber in \"signal_a\"")]
+    #[should_panic(expected = "revent: no node in \"signal_a\"")]
     fn emit_on_empty_single() {
         trait Interface {}
         impl Interface for () {}
 
         // ---
 
-        struct Hub {
+        struct MyAnchor {
             signal_a: Single<dyn Interface>,
             manager: Rc<RefCell<Manager>>,
         }
 
         let mut hub = {
             let manager = Rc::new(RefCell::new(Manager::default()));
-            Hub {
+            MyAnchor {
                 signal_a: Single::new("signal_a", manager.clone()),
                 manager,
             }
         };
 
-        impl Anchor for Hub {
+        impl Anchor for MyAnchor {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -293,20 +283,20 @@ mod tests {
 
         // ---
 
-        struct Hub {
+        struct MyAnchor {
             signal_a: Single<dyn Interface>,
             manager: Rc<RefCell<Manager>>,
         }
 
         let mut hub = {
             let manager = Rc::new(RefCell::new(Manager::default()));
-            Hub {
+            MyAnchor {
                 signal_a: Single::new("signal_a", manager.clone()),
                 manager,
             }
         };
 
-        impl Anchor for Hub {
+        impl Anchor for MyAnchor {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -314,25 +304,20 @@ mod tests {
 
         // ---
 
+        struct MyEmitter;
         struct MyNode;
-        impl Emit<Hub> for MyNode {
-            fn create(_: &Hub) -> MyNode {
-                Self
+        impl Node<MyAnchor, MyEmitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> MyEmitter {
+                MyEmitter
             }
-        }
-        struct MySubscriber;
-        impl Subscriber<Hub> for MySubscriber {
-            type Emitter = MyNode;
-            fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
+            const NAME: &'static str = "MyNode";
         }
-        impl Named for MySubscriber {
-            const NAME: &'static str = "MySubscriber";
-        }
-        impl Interface for MySubscriber {}
+        impl Interface for MyNode {}
 
-        let item = hub.subscribe(|_| MySubscriber);
+        let item = hub.subscribe(|_| MyNode);
 
         hub.unsubscribe(&item);
         hub.unsubscribe(&item);

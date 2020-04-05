@@ -1,13 +1,13 @@
 use crate::{assert_active_manager, Manager, Mode};
 use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 
-/// List of [Subscriber](crate::Subscriber)s to a signal `T`.
+/// List of [Node](crate::Node)s to a signal `T`.
 ///
-/// A `slot` is a list in which one can store subscriber handles.
+/// A `slot` is a list in which one can store node handles.
 pub struct Slot<T: ?Sized> {
     manager: Rc<RefCell<Manager>>,
     name: &'static str,
-    subscribers: Rc<RefCell<Vec<Rc<RefCell<T>>>>>,
+    nodes: Rc<RefCell<Vec<Rc<RefCell<T>>>>>,
 }
 
 impl<T: ?Sized> Slot<T> {
@@ -22,7 +22,7 @@ impl<T: ?Sized> Slot<T> {
         Self {
             manager,
             name,
-            subscribers: Rc::new(RefCell::new(Vec::new())),
+            nodes: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -31,7 +31,7 @@ impl<T: ?Sized> Slot<T> {
     where
         F: FnMut(&mut T),
     {
-        for item in self.subscribers.borrow_mut().iter_mut() {
+        for item in self.nodes.borrow_mut().iter_mut() {
             let mut item = item.borrow_mut();
             caller(&mut *item);
         }
@@ -42,7 +42,7 @@ impl<T: ?Sized> Slot<T> {
     where
         F: FnMut(&mut T) -> bool,
     {
-        for item in self.subscribers.borrow_mut().iter_mut() {
+        for item in self.nodes.borrow_mut().iter_mut() {
             let mut item = item.borrow_mut();
             if !caller(&mut *item) {
                 break;
@@ -50,12 +50,12 @@ impl<T: ?Sized> Slot<T> {
         }
     }
 
-    /// Sort the subscribers to this slot.
+    /// Sort the nodes to this slot.
     pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&T, &T) -> Ordering,
     {
-        self.subscribers.borrow_mut().sort_by(|x, y| {
+        self.nodes.borrow_mut().sort_by(|x, y| {
             let x = x.borrow();
             let y = y.borrow();
             compare(&*x, &*y)
@@ -86,10 +86,10 @@ impl<T: ?Sized> Slot<T> {
             match mode {
                 Mode::Adding => {
                     mng.register_subscribe(self.name);
-                    self.subscribers.borrow_mut().push(item);
+                    self.nodes.borrow_mut().push(item);
                 }
                 Mode::Removing => {
-                    let mut subs = self.subscribers.borrow_mut();
+                    let mut subs = self.nodes.borrow_mut();
                     match subs
                         .iter()
                         .enumerate()
@@ -119,7 +119,7 @@ impl<T: ?Sized> Clone for Slot<T> {
         Self {
             manager: self.manager.clone(),
             name: self.name,
-            subscribers: self.subscribers.clone(),
+            nodes: self.nodes.clone(),
         }
     }
 }
@@ -138,14 +138,14 @@ impl<T: ?Sized> fmt::Debug for Slot<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slot")
             .field("name", &self.name)
-            .field("subscribers", &PointerWrapper(self.subscribers.clone()))
+            .field("nodes", &PointerWrapper(self.nodes.clone()))
             .finish()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Emit, Manager, Named, Slot, Subscriber};
+    use crate::{Anchor, Manager, Node, Slot};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
@@ -180,17 +180,17 @@ mod tests {
 
         // ---
 
-        struct Hub {
+        struct MyAnchor {
             signal_a: Slot<dyn Interface>,
             manager: Rc<RefCell<Manager>>,
         }
 
-        let mut hub = Hub {
+        let mut hub = MyAnchor {
             signal_a: Slot::new("signal_a", Rc::new(RefCell::new(Manager::default()))),
             manager: Rc::new(RefCell::new(Manager::default())),
         };
 
-        impl Anchor for Hub {
+        impl Anchor for MyAnchor {
             fn manager(&self) -> &Rc<RefCell<Manager>> {
                 &self.manager
             }
@@ -198,25 +198,20 @@ mod tests {
 
         // ---
 
+        struct MyEmitter;
         struct MyNode;
-        impl Emit<Hub> for MyNode {
-            fn create(_: &Hub) -> MyNode {
-                Self
+        impl Node<MyAnchor, MyEmitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> MyEmitter {
+                MyEmitter
             }
-        }
-        struct MySubscriber;
-        impl Subscriber<Hub> for MySubscriber {
-            type Emitter = MyNode;
-            fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.signal_a.register(item);
             }
+            const NAME: &'static str = "MyNode";
         }
-        impl Named for MySubscriber {
-            const NAME: &'static str = "MySubscriber";
-        }
-        impl Interface for MySubscriber {}
+        impl Interface for MyNode {}
 
-        hub.subscribe(|_| MySubscriber);
+        hub.subscribe(|_| MyNode);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use revent::{Anchor, Manager, Named, Slot, Subscriber};
+use revent::{Anchor, Manager, Node, Slot};
 use std::{cell::RefCell, rc::Rc};
 
 // 1. Define your events using traits.
@@ -12,20 +12,20 @@ pub trait EventHandler {
 
 // 2. Create an event node - a collection of event slots.
 #[derive(Debug)]
-struct Hub {
+struct MyAnchor {
     basic: Slot<dyn EventHandler>,
     manager: Rc<RefCell<Manager>>,
 }
 
 // 2a. The node only needs to implement `manager`.
-impl Anchor for Hub {
+impl Anchor for MyAnchor {
     fn manager(&self) -> &Rc<RefCell<Manager>> {
         &self.manager
     }
 }
 
 // 2b. Construct the new node. A manager must be supplied to all slots.
-impl Hub {
+impl MyAnchor {
     fn new() -> Self {
         let manager = Rc::new(RefCell::new(Manager::new()));
         Self {
@@ -37,7 +37,7 @@ impl Hub {
 
 fn main() {
     // 3. Construct a new node.
-    let mut hub = Hub::new();
+    let mut hub = MyAnchor::new();
 
     // 4. Add instances of the hub traits.
     //
@@ -49,21 +49,20 @@ fn main() {
         }
     }
 
-    // 5. Implement `Subscriber` for the event handler.
+    // 5. Implement `Node` for the event handler.
     //
-    // Subscriber informs the hub how to build and subscribe the type to slots. It also
+    // Node informs the hub how to build and subscribe the type to slots. It also
     // ensures that we don't have any recursive subscriptions.
-    impl Subscriber<Hub> for MyEventHandler {
-        type Emitter = ();
-        fn register(anchor: &mut Hub, item: Rc<RefCell<Self>>) {
+    impl Node<MyAnchor, ()> for MyEventHandler {
+        fn register_emits(_: &MyAnchor) -> () {
+            ()
+        }
+        fn register_listens(anchor: &mut MyAnchor, item: Rc<RefCell<Self>>) {
             // Tells the hub anchor which slots to listen to.
             // node.basic.register(item.clone());
             anchor.basic.register(item);
             // node.basic.clone();
         }
-    }
-
-    impl Named for MyEventHandler {
         const NAME: &'static str = "MyEventHandler";
     }
 
@@ -76,16 +75,16 @@ fn main() {
     // takes a reference to the `dyn Trait` for that signal handler. This allows us to use the return type
     // or send in complex types with lifetime parameters.
     //
-    // The lambda is called for every subscriber in the slot in subscription order.
+    // The lambda is called for every node in the slot in subscription order.
     hub.basic.emit(|x| {
         x.event();
     });
 
     println!("{:#?}", hub);
 
-    // 8. Remove the subscriber.
+    // 8. Remove the node.
     //
     // To showcase how we can remove subscribers, just insert the item returned from `subscribe`.
-    // This uses the item's `register` method to figure out which slots to unsubscribe from.
+    // This uses the item's `register_listens` method to figure out which slots to unsubscribe from.
     hub.unsubscribe(&item);
 }

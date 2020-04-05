@@ -19,7 +19,7 @@ struct ListensAndEmits {
     listens: Vec<ChannelName>,
 }
 
-/// Inspects how various [Subscriber](crate::Subscriber)s use [Slot](crate::Slot)s.
+/// Inspects how various [Node](crate::Node)s use slots.
 ///
 /// Will [panic] if there exists any subscriber cycle. Cycle detection occurs only during
 /// [Anchor::subscribe](crate::Anchor::subscribe). Emitting will not perform any cycle detection.
@@ -31,7 +31,7 @@ pub struct Manager {
     active: Vec<ListensAndEmits>,
     amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
 
-    emitters: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
+    register_emitss: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
     listens: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
 }
 
@@ -43,11 +43,11 @@ impl Manager {
 
     pub(crate) fn ensure_new(&mut self, name: &'static str) {
         assert!(
-            !self.emitters.contains_key(name),
+            !self.register_emitss.contains_key(name),
             "revent: name is already registered to this manager: {:?}",
             name
         );
-        self.emitters.insert(name, Default::default());
+        self.register_emitss.insert(name, Default::default());
     }
 
     pub(crate) fn prepare_construction(&mut self, name: &'static str) {
@@ -94,7 +94,10 @@ impl Manager {
         }
 
         for item in &last.emits {
-            let emits = self.emitters.entry(item).or_insert_with(Default::default);
+            let emits = self
+                .register_emitss
+                .entry(item)
+                .or_insert_with(Default::default);
             emits.insert(last.name);
         }
 
@@ -119,7 +122,7 @@ impl Default for Manager {
             active: Default::default(),
             amalgam: Default::default(),
 
-            emitters: Default::default(),
+            register_emitss: Default::default(),
             listens: Default::default(),
         }
     }
@@ -176,7 +179,7 @@ impl<'a> Display for RecursionPrinter<'a> {
                 let to = window[1];
 
                 dbg!(to);
-                let emitters = self.manager.emitters.get(to).unwrap();
+                let register_emitss = self.manager.register_emitss.get(to).unwrap();
                 let mut intersection = self
                     .manager
                     .listens
@@ -184,7 +187,7 @@ impl<'a> Display for RecursionPrinter<'a> {
                     .expect(
                         "revent: internal error: recursion chain contains malformed information",
                     )
-                    .intersection(emitters);
+                    .intersection(register_emitss);
 
                 write!(f, "[")?;
                 if let Some(item) = intersection.next() {
