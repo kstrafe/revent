@@ -40,7 +40,7 @@ impl<T: ?Sized> Single<T> {
         if let Some(item) = &mut *item {
             caller(&mut item.borrow_mut())
         } else {
-            panic!("revent no subscriber in {:?}", self.name)
+            panic!("revent: no subscriber in {:?}", self.name)
         }
     }
 
@@ -48,6 +48,14 @@ impl<T: ?Sized> Single<T> {
     ///
     /// The action taken depends on whether [Anchor::subscribe](crate::Anchor::subscribe) or
     /// [Anchor::unsubscribe](crate::Anchor::unsubscribe) was called.
+    ///
+    /// # Panics #
+    ///
+    /// Panics if called from [Anchor::unsubscribe](crate::Anchor::unsubscribe) while not being
+    /// registered.
+    ///
+    /// Panics from a [Anchor::subscribe](crate::Anchor::subscribe) context if an object is already
+    /// registered with this `Single`.
     pub fn register(&mut self, item: Rc<RefCell<T>>) {
         assert_active_manager(&self.manager);
         let mut mng = self.manager.borrow_mut();
@@ -58,14 +66,14 @@ impl<T: ?Sized> Single<T> {
                     mng.register_subscribe(self.name);
                     assert!(
                         replace(&mut *self.subscriber.borrow_mut(), Some(item)).is_none(),
-                        "revent unable to register subscription to item twice: {:?}",
+                        "revent: unable to register multiple items simultaneously: {:?}",
                         self.name
                     );
                 }
                 Mode::Removing => {
                     assert!(
-                        replace(&mut *self.subscriber.borrow_mut(), Some(item)).is_some(),
-                        "revent unable to deregister non-existent item: {:?}",
+                        replace(&mut *self.subscriber.borrow_mut(), None).is_some(),
+                        "revent: unable to deregister nonexistent item: {:?}",
                         self.name
                     );
                 }
@@ -109,11 +117,11 @@ impl<T: ?Sized> fmt::Debug for Single<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Manager, Named, Single, Subscriber};
+    use crate::{Anchor, Emit, Manager, Named, Single, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Anchor context")]
+    #[should_panic(expected = "revent: signal modification outside of Anchor context")]
     fn using_signal_push_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -125,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Anchor context")]
+    #[should_panic(expected = "revent: signal modification outside of Anchor context")]
     fn using_signal_clone_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -137,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent manager is different")]
+    #[should_panic(expected = "revent: manager is different")]
     fn subscribing_with_different_manager() {
         trait Interface {}
         impl Interface for () {}
@@ -163,8 +171,8 @@ mod tests {
         // ---
 
         struct MyNode;
-        impl From<&Hub> for MyNode {
-            fn from(_: &Hub) -> MyNode {
+        impl Emit<Hub> for MyNode {
+            fn create(_: &Hub) -> MyNode {
                 Self
             }
         }
@@ -184,7 +192,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent unable to register subscription to item twice: \"signal_a\"")]
+    #[should_panic(
+        expected = "revent: unable to register multiple items simultaneously: \"signal_a\""
+    )]
     fn double_single_registered() {
         trait Interface {}
         impl Interface for () {}
@@ -213,8 +223,8 @@ mod tests {
         // ---
 
         struct MyNode;
-        impl From<&Hub> for MyNode {
-            fn from(_: &Hub) -> MyNode {
+        impl Emit<Hub> for MyNode {
+            fn create(_: &Hub) -> MyNode {
                 Self
             }
         }
@@ -235,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent no subscriber in \"signal_a\"")]
+    #[should_panic(expected = "revent: no subscriber in \"signal_a\"")]
     fn emit_on_empty_single() {
         trait Interface {}
         impl Interface for () {}
@@ -267,11 +277,64 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent name is already registered to this manager: signal")]
+    #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
     fn double_subscription() {
         let mng = Rc::new(RefCell::new(Manager::default()));
 
         Single::<()>::new("signal", mng.clone());
         Single::<()>::new("signal", mng);
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: unable to deregister nonexistent item: \"signal_a\"")]
+    fn double_deregister() {
+        trait Interface {}
+        impl Interface for () {}
+
+        // ---
+
+        struct Hub {
+            signal_a: Single<dyn Interface>,
+            manager: Rc<RefCell<Manager>>,
+        }
+
+        let mut hub = {
+            let manager = Rc::new(RefCell::new(Manager::default()));
+            Hub {
+                signal_a: Single::new("signal_a", manager.clone()),
+                manager,
+            }
+        };
+
+        impl Anchor for Hub {
+            fn manager(&self) -> &Rc<RefCell<Manager>> {
+                &self.manager
+            }
+        }
+
+        // ---
+
+        struct MyNode;
+        impl Emit<Hub> for MyNode {
+            fn create(_: &Hub) -> MyNode {
+                Self
+            }
+        }
+        struct MySubscriber;
+        impl Subscriber<Hub> for MySubscriber {
+            type Emitter = MyNode;
+            fn register(hub: &mut Hub, item: Rc<RefCell<Self>>) {
+                hub.signal_a.register(item);
+            }
+        }
+        impl Named for MySubscriber {
+            const NAME: &'static str = "MySubscriber";
+        }
+        impl Interface for MySubscriber {}
+
+        let item = hub.subscribe(|_| MySubscriber);
+
+        hub.unsubscribe(&item);
+        hub.unsubscribe(&item);
     }
 }

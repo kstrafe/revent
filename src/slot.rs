@@ -70,6 +70,14 @@ impl<T: ?Sized> Slot<T> {
     /// When adding: pushes the item to the end of the list. See [sort_by](Slot::sort_by) if a different order is
     /// desired.
     /// When removing: `find`s the first matching instance and removes it.
+    ///
+    /// # Panics #
+    ///
+    /// Panics if called from [Anchor::unsubscribe](crate::Anchor::unsubscribe) while not being
+    /// registered.
+    ///
+    /// Panics if called more than once for the same object from within
+    /// [Anchor::subscribe](crate::Anchor::subscribe).
     pub fn register(&mut self, item: Rc<RefCell<T>>) {
         assert_active_manager(&self.manager);
         let mut mng = self.manager.borrow_mut();
@@ -82,12 +90,21 @@ impl<T: ?Sized> Slot<T> {
                 }
                 Mode::Removing => {
                     let mut subs = self.subscribers.borrow_mut();
-                    let (idx, _) = subs
+                    match subs
                         .iter()
                         .enumerate()
                         .find(|(_, value)| Rc::ptr_eq(&item, value))
-                        .expect("unable to unsubscribe non-subscribed item");
-                    subs.remove(idx);
+                    {
+                        Some((idx, _)) => {
+                            subs.remove(idx);
+                        }
+                        None => {
+                            panic!(
+                                "revent: unable to deregister nonexistent item: {:?}",
+                                self.name
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -128,11 +145,11 @@ impl<T: ?Sized> fmt::Debug for Slot<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Manager, Named, Slot, Subscriber};
+    use crate::{Anchor, Emit, Manager, Named, Slot, Subscriber};
     use std::{cell::RefCell, rc::Rc};
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Anchor context")]
+    #[should_panic(expected = "revent: signal modification outside of Anchor context")]
     fn using_signal_push_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -144,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent signal modification outside of Anchor context")]
+    #[should_panic(expected = "revent: signal modification outside of Anchor context")]
     fn using_signal_clone_outside_subscribe() {
         trait Interface {}
         impl Interface for () {}
@@ -156,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent manager is different")]
+    #[should_panic(expected = "revent: manager is different")]
     fn subscribing_with_different_manager() {
         trait Interface {}
         impl Interface for () {}
@@ -182,8 +199,8 @@ mod tests {
         // ---
 
         struct MyNode;
-        impl From<&Hub> for MyNode {
-            fn from(_: &Hub) -> MyNode {
+        impl Emit<Hub> for MyNode {
+            fn create(_: &Hub) -> MyNode {
                 Self
             }
         }
@@ -203,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent name is already registered to this manager: signal")]
+    #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
     fn double_subscription() {
         let mng = Rc::new(RefCell::new(Manager::default()));
 

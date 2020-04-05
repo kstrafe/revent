@@ -37,7 +37,7 @@ where
     fn subscribe<T, F>(&mut self, create: F) -> Rc<RefCell<T>>
     where
         T: Named + Subscriber<Self>,
-        T::Emitter: for<'a> From<&'a Self>,
+        T::Emitter: Emit<Self>,
         F: FnOnce(T::Emitter) -> T,
     {
         let manager = self.manager().clone();
@@ -47,7 +47,7 @@ where
 
         manager.borrow_mut().prepare_construction(T::NAME);
 
-        let emitter = T::Emitter::from(self);
+        let emitter = T::Emitter::create(self);
         let item = Rc::new(RefCell::new(create(emitter)));
         T::register(self, item.clone());
 
@@ -80,7 +80,7 @@ where
 
 /// Describes a subscriber that can subscribe to [Anchor].
 /// ```
-/// use revent::{Anchor, Manager, Named, Null, Slot, Subscriber};
+/// use revent::{Anchor, Manager, Named, Slot, Subscriber};
 /// use std::{cell::RefCell, rc::Rc};
 ///
 /// trait A {}
@@ -101,7 +101,7 @@ where
 /// struct MyNode;
 ///
 /// impl Subscriber<MySlots> for MyNode {
-///     type Emitter = Null;
+///     type Emitter = ();
 ///
 ///     fn register(slots: &mut MySlots, item: Rc<RefCell<Self>>) {
 ///         slots.a.register(item);
@@ -117,8 +117,8 @@ where
 pub trait Subscriber<A: Anchor> {
     /// The type of the node it uses to further send signals to other [Slot](crate::Slot)s.
     ///
-    /// May be [Null](crate::Null) if no further signals are sent from this subscriber.
-    type Emitter;
+    /// May be `()` if no further signals are sent from this subscriber.
+    type Emitter: Emit<A>;
     /// Register to various channels inside an [Anchor].
     ///
     /// Note that this function is used for both [subscribe](Anchor::subscribe) as well as
@@ -134,4 +134,16 @@ pub trait Named {
     ///
     /// Used for figuring out recursions and graphing channel dependencies.
     const NAME: &'static str;
+}
+
+/// An emitter for a specific [Anchor].
+pub trait Emit<A: Anchor> {
+    /// Create a new emitter from a reference to an anchor.
+    fn create(anchor: &A) -> Self;
+}
+
+impl<A: Anchor> Emit<A> for () {
+    fn create(_: &A) -> Self {
+        ()
+    }
 }

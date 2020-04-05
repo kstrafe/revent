@@ -54,11 +54,11 @@ fn main() {
     // Subscriber informs the hub how to build and subscribe the type to slots. It also
     // ensures that we don't have any recursive subscriptions.
     impl Subscriber<Hub> for MyEventHandler {
-        type Emitter = revent::Null;
-        fn register(node: &mut Hub, item: Rc<RefCell<Self>>) {
-            // Tells the hub node which slots to listen to.
+        type Emitter = ();
+        fn register(anchor: &mut Hub, item: Rc<RefCell<Self>>) {
+            // Tells the hub anchor which slots to listen to.
             // node.basic.register(item.clone());
-            node.basic.register(item);
+            anchor.basic.register(item);
             // node.basic.clone();
         }
     }

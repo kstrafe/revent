@@ -44,7 +44,7 @@ impl Manager {
     pub(crate) fn ensure_new(&mut self, name: &'static str) {
         assert!(
             !self.emitters.contains_key(name),
-            "revent name is already registered to this manager: {}",
+            "revent: name is already registered to this manager: {:?}",
             name
         );
         self.emitters.insert(name, Default::default());
@@ -62,7 +62,8 @@ impl Manager {
         let last = self.active.last_mut().unwrap();
         assert!(
             last.emits.iter().find(|x| **x == signal).is_none(),
-            "revent not allowed to clone a slot more than once for a node"
+            "revent: not allowed to clone more than once per subscription: {:?}",
+            signal
         );
         last.emits.push(signal);
     }
@@ -71,7 +72,8 @@ impl Manager {
         let last = self.active.last_mut().unwrap();
         assert!(
             last.listens.iter().find(|x| **x == signal).is_none(),
-            "revent not allowed to subscribe to a slot more than once per object"
+            "revent: not allowed to register more than once per subscription: {:?}",
+            signal
         );
         last.listens.push(signal);
     }
@@ -100,7 +102,7 @@ impl Manager {
             Ok(()) => {}
             Err(chain) => {
                 panic!(
-                    "revent found a recursion during subscription: {}",
+                    "revent: found a recursion during subscription: {}",
                     RecursionPrinter {
                         chain,
                         manager: self,
@@ -167,7 +169,7 @@ struct RecursionPrinter<'a> {
 impl<'a> Display for RecursionPrinter<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self.chain.len() < 2 {
-            panic!("revent internal error: recursion chain has length < 2");
+            panic!("revent: internal error: recursion chain has length < 2");
         } else if self.chain.len() >= 2 {
             for window in self.chain.windows(2) {
                 let from = window[0];
@@ -179,7 +181,9 @@ impl<'a> Display for RecursionPrinter<'a> {
                     .manager
                     .listens
                     .get(from)
-                    .expect("revent internal error: recursion chain contains malformed information")
+                    .expect(
+                        "revent: internal error: recursion chain contains malformed information",
+                    )
                     .intersection(emitters);
 
                 write!(f, "[")?;

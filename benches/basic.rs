@@ -36,10 +36,10 @@ mod setup {
     }
 
     impl Subscriber<Hub> for MyEventHandler {
-        type Emitter = revent::Null;
+        type Emitter = ();
 
-        fn register(node: &mut Hub, item: Rc<RefCell<Self>>) {
-            node.basic.register(item);
+        fn register(anchor: &mut Hub, item: Rc<RefCell<Self>>) {
+            anchor.basic.register(item);
         }
     }
 
