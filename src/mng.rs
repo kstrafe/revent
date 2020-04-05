@@ -31,7 +31,7 @@ pub struct Manager {
     active: Vec<ListensAndEmits>,
     amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
 
-    register_emitss: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
+    emits: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
     listens: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
 }
 
@@ -43,11 +43,11 @@ impl Manager {
 
     pub(crate) fn ensure_new(&mut self, name: &'static str) {
         assert!(
-            !self.register_emitss.contains_key(name),
+            !self.emits.contains_key(name),
             "revent: name is already registered to this manager: {:?}",
             name
         );
-        self.register_emitss.insert(name, Default::default());
+        self.emits.insert(name, Default::default());
     }
 
     pub(crate) fn prepare_construction(&mut self, name: &'static str) {
@@ -94,10 +94,7 @@ impl Manager {
         }
 
         for item in &last.emits {
-            let emits = self
-                .register_emitss
-                .entry(item)
-                .or_insert_with(Default::default);
+            let emits = self.emits.entry(item).or_insert_with(Default::default);
             emits.insert(last.name);
         }
 
@@ -122,7 +119,7 @@ impl Default for Manager {
             active: Default::default(),
             amalgam: Default::default(),
 
-            register_emitss: Default::default(),
+            emits: Default::default(),
             listens: Default::default(),
         }
     }
@@ -178,8 +175,7 @@ impl<'a> Display for RecursionPrinter<'a> {
                 let from = window[0];
                 let to = window[1];
 
-                dbg!(to);
-                let register_emitss = self.manager.register_emitss.get(to).unwrap();
+                let emits = self.manager.emits.get(to).unwrap();
                 let mut intersection = self
                     .manager
                     .listens
@@ -187,7 +183,7 @@ impl<'a> Display for RecursionPrinter<'a> {
                     .expect(
                         "revent: internal error: recursion chain contains malformed information",
                     )
-                    .intersection(register_emitss);
+                    .intersection(emits);
 
                 write!(f, "[")?;
                 if let Some(item) = intersection.next() {
@@ -208,39 +204,90 @@ impl<'a> Display for RecursionPrinter<'a> {
 // ---
 
 /// Wrapper around a [Manager] that generates a graph.
-pub struct Grapher<'a> {
-    manager: &'a Manager,
+pub struct Grapher {
+    invemits: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
+    invlistens: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
 }
 
-impl<'a> Grapher<'a> {
+impl Grapher {
     /// Create a new grapher.
-    pub fn new(manager: &'a Manager) -> Self {
-        Self { manager }
+    pub fn new(manager: &Manager) -> Self {
+        Self {
+            invemits: Self::invert(&manager.emits),
+            invlistens: Self::invert(&manager.listens),
+        }
+    }
+
+    fn invert(
+        map: &BTreeMap<ChannelName, BTreeSet<HandlerName>>,
+    ) -> BTreeMap<HandlerName, BTreeSet<ChannelName>> {
+        let mut inverse: BTreeMap<_, BTreeSet<ChannelName>> = BTreeMap::new();
+
+        for (channel, handlers) in map {
+            for handler in handlers {
+                let emit = inverse.entry(*handler).or_insert_with(Default::default);
+                emit.insert(channel);
+            }
+        }
+
+        inverse
+    }
+
+    fn find_available_anchor_id(&self) -> String {
+        let mut current = String::from("Anchor#0");
+        let mut count = 0;
+
+        while self.invlistens.contains_key(&current[..]) || self.invemits.contains_key(&current[..])
+        {
+            count += 1;
+            current = String::from("Anchor#") + &count.to_string();
+        }
+        current
     }
 }
 
-impl<'a> Display for Grapher<'a> {
+impl Display for Grapher {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let mng = self.manager;
+        writeln!(f, "strict digraph {{")?;
 
-        writeln!(f, "digraph Manager {{")?;
+        let anchor_id = self.find_available_anchor_id();
+        let mut colors = [
+            "#3D9970", "#85144B", "#0074D9", "#2ECC40", "#FF4136", "#111111",
+        ]
+        .iter()
+        .cycle();
 
-        for (channel, handlers) in &mng.listens {
-            write!(
-                f,
-                "\t{}[label=<<FONT POINT-SIZE=\"20\">{}</FONT>",
-                channel, channel
-            )?;
-            for handler in handlers {
-                write!(f, "<BR/>{}", handler)?;
+        for (to, listen_channels) in &self.invlistens {
+            let mut leftover = listen_channels.clone();
+            for (from, emit_channels) in &self.invemits {
+                let merged = listen_channels
+                    .intersection(emit_channels)
+                    .collect::<Vec<_>>();
+                leftover = leftover.difference(emit_channels).cloned().collect();
+                if !merged.is_empty() {
+                    let mut merged_iter = merged.iter();
+                    let color = colors.next().unwrap();
+                    write!(f, "\t{:?} -> {:?}[color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", from, to, color, color, merged_iter.next().unwrap())?;
+
+                    for item in merged_iter {
+                        write!(f, "<BR/>{}", item)?;
+                    }
+                    writeln!(f, "</FONT>>];")?;
+                }
             }
-            writeln!(f, ">];")?;
-        }
 
-        for (from, to) in &mng.amalgam {
-            for to in to {
-                writeln!(f, "\t{} -> {};", from, to)?;
+            // We should also highlight signals coming from the root node that are not used by anyone
+            // else.
+            if !leftover.is_empty() {
+                let mut iter = leftover.iter();
+                let color = colors.next().unwrap();
+                write!(f, "\t{:?} -> {:?}[arrowhead=\"diamond\",color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", anchor_id, to, color, color, iter.next().unwrap())?;
+                for left in iter {
+                    write!(f, "<BR/>{}", left)?;
+                }
+                writeln!(f, "</FONT>>];")?;
             }
+            writeln!(f, "\t{:?}[label=\"Anchor\"];", anchor_id)?;
         }
 
         write!(f, "}}")?;
@@ -275,10 +322,7 @@ mod tests {
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            r#"digraph Manager {
-	b[label=<<FONT POINT-SIZE="20">b</FONT><BR/>B<BR/>C>];
-	b -> c;
-}"#
+            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n}"
         );
     }
 }
