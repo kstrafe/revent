@@ -33,6 +33,8 @@ pub struct Manager {
 
     emits: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
     listens: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
+
+    queues: BTreeSet<ChannelName>,
 }
 
 impl Manager {
@@ -41,13 +43,22 @@ impl Manager {
         Self::default()
     }
 
-    pub(crate) fn ensure_new(&mut self, name: &'static str) {
+    fn unique_name(&self, name: &'static str) {
         assert!(
-            !self.emits.contains_key(name),
+            !self.queues.contains(name) && !self.amalgam.contains_key(name),
             "revent: name is already registered to this manager: {:?}",
             name
         );
-        self.emits.insert(name, Default::default());
+    }
+
+    pub(crate) fn ensure_queue(&mut self, name: &'static str) {
+        self.unique_name(name);
+        self.queues.insert(name);
+    }
+
+    pub(crate) fn ensure_new(&mut self, name: &'static str) {
+        self.unique_name(name);
+        self.amalgam.insert(name, Default::default());
     }
 
     pub(crate) fn prepare_construction(&mut self, name: &'static str) {
@@ -121,6 +132,8 @@ impl Default for Manager {
 
             emits: Default::default(),
             listens: Default::default(),
+
+            queues: Default::default(),
         }
     }
 }
@@ -204,17 +217,19 @@ impl<'a> Display for RecursionPrinter<'a> {
 // ---
 
 /// Wrapper around a [Manager] that generates a graph.
-pub struct Grapher {
+pub struct Grapher<'a> {
     invemits: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
     invlistens: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
+    queues: &'a BTreeSet<ChannelName>,
 }
 
-impl Grapher {
+impl<'a> Grapher<'a> {
     /// Create a new grapher.
-    pub fn new(manager: &Manager) -> Self {
+    pub fn new(manager: &'a Manager) -> Self {
         Self {
             invemits: Self::invert(&manager.emits),
             invlistens: Self::invert(&manager.listens),
+            queues: &manager.queues,
         }
     }
 
@@ -246,7 +261,7 @@ impl Grapher {
     }
 }
 
-impl Display for Grapher {
+impl<'a> Display for Grapher<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "strict digraph {{")?;
 
@@ -288,7 +303,16 @@ impl Display for Grapher {
                 writeln!(f, "</FONT>>];")?;
             }
         }
-        write!(f, "\t{:?}[label=\"Anchor\"];\n}}", anchor_id)?;
+        write!(f, "\t{:?}[label=<Anchor", anchor_id)?;
+
+        if !self.queues.is_empty() {
+            write!(f, "<BR/><FONT POINT-SIZE=\"10\">")?;
+            for queue in self.queues.iter() {
+                write!(f, "{}<BR/>", queue)?;
+            }
+            write!(f, "</FONT>")?;
+        }
+        write!(f, ">];\n}}")?;
 
         Ok(())
     }
@@ -320,7 +344,19 @@ mod tests {
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n}"
+            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=<Anchor>];\n}"
+        );
+    }
+
+    #[test]
+    fn graphing_queues() {
+        let mut mng = Manager::default();
+        mng.ensure_queue("queue");
+
+        let grapher = Grapher::new(&mng);
+        assert_eq!(
+            format!("{}", grapher),
+            "strict digraph {\n\t\"Anchor#0\"[label=<Anchor<BR/><FONT POINT-SIZE=\"10\">queue<BR/></FONT>>];\n}"
         );
     }
 }

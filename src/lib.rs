@@ -189,12 +189,14 @@
 )]
 
 mod mng;
+mod queue;
 mod single;
 mod slot;
 mod traits;
 pub(crate) use self::mng::Mode;
 pub use self::{
     mng::{Grapher, Manager},
+    queue::{Receiver, Sender},
     single::Single,
     slot::Slot,
     traits::{Anchor, Node},
@@ -223,7 +225,7 @@ fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Manager, Node, Single, Slot};
+    use crate::{Anchor, Manager, Node, Receiver, Single, Slot};
     use std::{cell::RefCell, rc::Rc};
 
     #[quickcheck_macros::quickcheck]
@@ -732,5 +734,55 @@ mod tests {
             count += 1;
         });
         assert_eq!(101, count);
+    }
+
+    #[test]
+    fn using_queues() {
+        struct MyAnchor {
+            queue: Receiver<usize>,
+            mng: Rc<RefCell<Manager>>,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Rc::new(RefCell::new(Manager::default()));
+                Self {
+                    queue: Receiver::new("queue", mng.clone()),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Rc<RefCell<Manager>> {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct Listener;
+        impl Node<MyAnchor, ()> for Listener {
+            fn register_emits(anchor: &MyAnchor) {
+                anchor.queue.sender().push(0);
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "Listener";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        hub.subscribe(|_| Listener);
+
+        let msgs = hub.queue.exchange(Vec::new());
+        assert_eq!(&[0], &msgs[..]);
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: name is already registered to this manager: \"lorem\"")]
+    fn double_receiver() {
+        let mng = Rc::new(RefCell::new(Manager::new()));
+
+        Receiver::<()>::new("lorem", mng.clone());
+        Slot::<()>::new("lorem", mng);
     }
 }
