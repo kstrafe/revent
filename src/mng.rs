@@ -287,10 +287,8 @@ impl Display for Grapher {
                 }
                 writeln!(f, "</FONT>>];")?;
             }
-            writeln!(f, "\t{:?}[label=\"Anchor\"];", anchor_id)?;
         }
-
-        write!(f, "}}")?;
+        write!(f, "\t{:?}[label=\"Anchor\"];\n}}", anchor_id)?;
 
         Ok(())
     }
@@ -322,7 +320,7 @@ mod tests {
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n}"
+            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=\"Anchor\"];\n}"
         );
     }
 }
