@@ -2,39 +2,37 @@
 //!
 //! # What is an event system? #
 //!
-//! An event system is a set of slots which contain objects. A signal is emitted on a slot, which
-//! will call each object in the slot. Invoked objects can then send more signals to different
-//! slots.
-//!
-//! # Synchronous #
+//! An event system is a set of objects that can exchange messages with each other. In revent each
+//! object indicates which `channel`s it wants to emit and listen to. Based off this information
+//! revent generates a directed acyclic graph (DAG). Revent will panic if a cycle is detected.
 //!
 //! Revent's events are synchronous, meaning that emitting an event will immediately process all
-//! handlers in a slot. Once the function call returns, it is guaranteed that all listeners have
+//! handlers of that event. Once the function call returns, it is guaranteed that all listeners have
 //! been called.
 //!
 //! # Basic Example #
 //!
 //! ```
-//! use revent::{Anchor, Manager, Node, Slot};
+//! use revent::{Anchor, Grapher, Manager, Node, Slot};
 //! use std::{cell::RefCell, rc::Rc};
 //!
 //! trait BasicSignal {}
 //!
 //! struct MyAnchor {
 //!     basic_slot: Slot<dyn BasicSignal>,
-//!     mng: Rc<RefCell<Manager>>,
+//!     mng: Manager,
 //! }
 //! impl MyAnchor {
 //!     fn new() -> Self {
-//!         let mng = Rc::new(RefCell::new(Manager::default()));
+//!         let mng = Manager::new();
 //!         Self {
-//!             basic_slot: Slot::new("basic_slot", mng.clone()),
+//!             basic_slot: Slot::new("basic_slot", &mng),
 //!             mng,
 //!         }
 //!     }
 //! }
 //! impl Anchor for MyAnchor {
-//!     fn manager(&self) -> &Rc<RefCell<Manager>> {
+//!     fn manager(&self) -> &Manager {
 //!         &self.mng
 //!     }
 //! }
@@ -60,6 +58,8 @@
 //!     println!("Called for each subscriber");
 //! });
 //! hub.unsubscribe(&item);
+//!
+//! Grapher::new(hub.manager()).graph_to_file("target/documentation-example.png").unwrap();
 //! ```
 //!
 //! ## Mutable cycles ##
@@ -104,7 +104,7 @@
 //! # Example with Emitter #
 //!
 //! ```
-//! use revent::{Anchor, Manager, Node, Slot};
+//! use revent::{Anchor, Grapher, Manager, Node, Slot};
 //! use std::{cell::RefCell, rc::Rc};
 //!
 //! // First let's crate a hub (Anchor) that contains two signals.
@@ -116,20 +116,20 @@
 //! struct MyAnchor {
 //!     basic_slot_1: Slot<dyn BasicSignal>,
 //!     basic_slot_2: Slot<dyn BasicSignal>,
-//!     mng: Rc<RefCell<Manager>>,
+//!     mng: Manager,
 //! }
 //! impl MyAnchor {
 //!     fn new() -> Self {
-//!         let mng = Rc::new(RefCell::new(Manager::default()));
+//!         let mng = Manager::new();
 //!         Self {
-//!             basic_slot_1: Slot::new("basic_slot_1", mng.clone()),
-//!             basic_slot_2: Slot::new("basic_slot_2", mng.clone()),
+//!             basic_slot_1: Slot::new("basic_slot_1", &mng),
+//!             basic_slot_2: Slot::new("basic_slot_2", &mng),
 //!             mng,
 //!         }
 //!     }
 //! }
 //! impl Anchor for MyAnchor {
-//!     fn manager(&self) -> &Rc<RefCell<Manager>> {
+//!     fn manager(&self) -> &Manager {
 //!         &self.mng
 //!     }
 //! }
@@ -177,8 +177,9 @@
 //! let item = hub.subscribe(|emits: MyEmitter| MyNode { emits });
 //! hub.basic_slot_1.emit(BasicSignal::basic);
 //! hub.unsubscribe(&item);
-//! ```
 //!
+//! Grapher::new(hub.manager()).graph_to_file("target/example-with-emitter.png").unwrap();
+//! ```
 #![deny(
     missing_docs,
     trivial_casts,
@@ -205,18 +206,19 @@ pub use self::{
 use std::{cell::RefCell, rc::Rc};
 
 thread_local! {
-    static STACK: RefCell<Vec<(Mode, Rc<RefCell<Manager>>)>> = RefCell::new(Vec::new());
+    static STACK: RefCell<Vec<(Mode, Manager)>> = RefCell::new(Vec::new());
 }
 
-fn assert_active_manager(manager: &Rc<RefCell<Manager>>) {
+fn assert_active_manager(manager: &Manager) {
     STACK.with(|x| {
         assert!(
             Rc::ptr_eq(
-                &x.borrow()
+                &(x.borrow()
                     .last()
                     .expect("revent: signal modification outside of Anchor context")
-                    .1,
-                manager
+                    .1)
+                    .0,
+                &manager.0
             ),
             "revent: manager is different"
         );
@@ -234,31 +236,31 @@ mod tests {
 
         struct MyAnchor {
             basic_signal: Slot<dyn BasicSignal>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    basic_signal: Slot::new("basic_signal", mng.clone()),
+                    basic_signal: Slot::new("basic_signal", &mng),
 
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(_: &MyAnchor) -> MyNodeNode {
-                MyNodeNode
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> Emitter {
+                Emitter
             }
 
             fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
@@ -294,31 +296,31 @@ mod tests {
 
         struct MyAnchor {
             basic_signal: Slot<dyn BasicSignal>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    basic_signal: Slot::new("basic_signal", mng.clone()),
+                    basic_signal: Slot::new("basic_signal", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(hub: &MyAnchor) -> MyNodeNode {
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(hub: &MyAnchor) -> Emitter {
                 let _ = hub.basic_signal.clone();
-                MyNodeNode
+                Emitter
             }
             fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
@@ -345,32 +347,32 @@ mod tests {
         struct MyAnchor {
             basic_signal: Slot<dyn BasicSignal>,
             other_signal: Slot<dyn OtherSignal>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    basic_signal: Slot::new("basic_signal", mng.clone()),
-                    other_signal: Slot::new("other_signal", mng.clone()),
+                    basic_signal: Slot::new("basic_signal", &mng),
+                    other_signal: Slot::new("other_signal", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(hub: &MyAnchor) -> MyNodeNode {
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(hub: &MyAnchor) -> Emitter {
                 let _ = hub.other_signal.clone();
-                MyNodeNode
+                Emitter
             }
             fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
@@ -409,30 +411,30 @@ mod tests {
 
         struct MyAnchor {
             basic_signal: Slot<dyn BasicSignal>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    basic_signal: Slot::new("basic_signal", mng.clone()),
+                    basic_signal: Slot::new("basic_signal", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(_: &MyAnchor) -> MyNodeNode {
-                MyNodeNode
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> Emitter {
+                Emitter
             }
             fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
@@ -478,30 +480,30 @@ mod tests {
 
         struct MyAnchor {
             basic_signal: Slot<dyn BasicSignal>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    basic_signal: Slot::new("basic_signal", mng.clone()),
+                    basic_signal: Slot::new("basic_signal", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(_: &MyAnchor) -> MyNodeNode {
-                MyNodeNode
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> Emitter {
+                Emitter
             }
             fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
                 hub.basic_signal.register(item);
@@ -521,27 +523,27 @@ mod tests {
     #[test]
     fn double_unsubscribe_deaf_node() {
         struct MyAnchor {
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self { mng }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
 
         // ---
 
-        struct MyNodeNode;
+        struct Emitter;
         struct MyNode;
-        impl Node<MyAnchor, MyNodeNode> for MyNode {
-            fn register_emits(_: &MyAnchor) -> MyNodeNode {
-                MyNodeNode
+        impl Node<MyAnchor, Emitter> for MyNode {
+            fn register_emits(_: &MyAnchor) -> Emitter {
+                Emitter
             }
             fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
             const NAME: &'static str = "MyNode";
@@ -558,10 +560,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
     fn double_subscription() {
-        let mng = Rc::new(RefCell::new(Manager::default()));
+        let mng = Manager::new();
 
-        Slot::<()>::new("signal", mng.clone());
-        Single::<()>::new("signal", mng);
+        Slot::<()>::new("signal", &mng);
+        Single::<()>::new("signal", &mng);
     }
 
     #[test]
@@ -569,19 +571,19 @@ mod tests {
     fn using_register_emits_outside_subscribe() {
         struct MyAnchor {
             slot: Slot<()>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    slot: Slot::new("slot", mng.clone()),
+                    slot: Slot::new("slot", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
@@ -599,19 +601,19 @@ mod tests {
     fn double_emit() {
         struct MyAnchor {
             slot: Slot<()>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    slot: Slot::new("slot", mng.clone()),
+                    slot: Slot::new("slot", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
@@ -646,19 +648,19 @@ mod tests {
     fn double_register() {
         struct MyAnchor {
             slot: Slot<Listener>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    slot: Slot::new("slot", mng.clone()),
+                    slot: Slot::new("slot", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
@@ -687,19 +689,19 @@ mod tests {
     fn nested_subscription_same_slot() {
         struct MyAnchor {
             slot: Slot<Listener>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    slot: Slot::new("slot", mng.clone()),
+                    slot: Slot::new("slot", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
@@ -740,19 +742,19 @@ mod tests {
     fn using_queues() {
         struct MyAnchor {
             queue: Receiver<usize>,
-            mng: Rc<RefCell<Manager>>,
+            mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
-                let mng = Rc::new(RefCell::new(Manager::default()));
+                let mng = Manager::new();
                 Self {
-                    queue: Receiver::new("queue", mng.clone()),
+                    queue: Receiver::new("queue", &mng),
                     mng,
                 }
             }
         }
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.mng
             }
         }
@@ -780,9 +782,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "revent: name is already registered to this manager: \"lorem\"")]
     fn double_receiver() {
-        let mng = Rc::new(RefCell::new(Manager::new()));
+        let mng = Manager::new();
 
-        Receiver::<()>::new("lorem", mng.clone());
-        Slot::<()>::new("lorem", mng);
+        Receiver::<()>::new("lorem", &mng);
+        Slot::<()>::new("lorem", &mng);
     }
 }

@@ -15,11 +15,11 @@ use std::{cell::RefCell, rc::Rc};
 ///     a: Slot<()>,
 ///     b: Slot<()>,
 ///     // more slots...
-///     manager: Rc<RefCell<Manager>>,
+///     manager: Manager,
 /// }
 ///
 /// impl Anchor for MyAnchor {
-///     fn manager(&self) -> &Rc<RefCell<Manager>> {
+///     fn manager(&self) -> &Manager {
 ///         &self.manager
 ///     }
 /// }
@@ -29,7 +29,7 @@ where
     Self: Sized,
 {
     /// Get the [Manager] of this anchor.
-    fn manager(&self) -> &Rc<RefCell<Manager>>;
+    fn manager(&self) -> &Manager;
 
     /// Add a node to this anchor.
     ///
@@ -45,13 +45,13 @@ where
             x.borrow_mut().push((Mode::Adding, manager.clone()));
         });
 
-        manager.borrow_mut().prepare_construction(T::NAME);
+        manager.prepare_construction(T::NAME);
 
         let register_emits = T::register_emits(self);
         let item = Rc::new(RefCell::new(create(register_emits)));
         T::register_listens(self, item.clone());
 
-        manager.borrow_mut().finish_construction();
+        manager.finish_construction();
         crate::STACK.with(|x| {
             x.borrow_mut().pop();
         });
@@ -65,7 +65,7 @@ where
     where
         T: Node<Self, R>,
     {
-        let manager = self.manager().clone();
+        let manager = self.manager();
         crate::STACK.with(|x| {
             x.borrow_mut().push((Mode::Removing, manager.clone()));
         });
@@ -86,12 +86,12 @@ where
 /// trait A {}
 ///
 /// struct MyAnchor {
-///     a: Slot<A>,
-///     manager: Rc<RefCell<Manager>>,
+///     a: Slot<dyn A>,
+///     manager: Manager,
 /// }
 ///
 /// impl Anchor for MyAnchor {
-///     fn manager(&self) -> &Rc<RefCell<Manager>> {
+///     fn manager(&self) -> &Manager {
 ///         &self.manager
 ///     }
 /// }

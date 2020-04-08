@@ -1,6 +1,11 @@
 use std::{
+    cell::{Ref, RefCell},
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display, Formatter},
+    fs, io,
+    path::Path,
+    process::Command,
+    rc::Rc,
 };
 
 type ChannelName = &'static str;
@@ -21,13 +26,21 @@ struct ListensAndEmits {
 
 /// Inspects how various [Node](crate::Node)s use slots.
 ///
-/// Will [panic] if there exists any subscriber cycle. Cycle detection occurs only during
-/// [Anchor::subscribe](crate::Anchor::subscribe). Emitting will not perform any cycle detection.
+/// Manager is active when subscribing to [Anchor]. It inspects the various listens and emits and
+/// ensures that there are no cycles created between nodes.
 ///
 /// Unsubscribing items does not remove the channel dependencies from the manager. This is
 /// intentional to discourage juggling subscriptions to fit the dependency chain.
+///
+/// # Panics #
+///
+/// Will [panic] if there exists any subscriber cycle. Cycle detection occurs only during
+/// [Anchor::subscribe](crate::Anchor::subscribe). Emitting will not perform any cycle detection.
+#[derive(Clone, Debug)]
+pub struct Manager(pub(crate) Rc<RefCell<ManagerInternal>>);
+
 #[derive(Debug)]
-pub struct Manager {
+pub(crate) struct ManagerInternal {
     active: Vec<ListensAndEmits>,
     amalgam: BTreeMap<ChannelName, BTreeSet<ChannelName>>,
 
@@ -37,12 +50,7 @@ pub struct Manager {
     queues: BTreeSet<ChannelName>,
 }
 
-impl Manager {
-    /// Create a new manager.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+impl ManagerInternal {
     fn unique_name(&self, name: &'static str) {
         assert!(
             !self.queues.contains(name) && !self.amalgam.contains_key(name),
@@ -50,27 +58,42 @@ impl Manager {
             name
         );
     }
+}
 
-    pub(crate) fn ensure_queue(&mut self, name: &'static str) {
-        self.unique_name(name);
-        self.queues.insert(name);
+impl Manager {
+    /// Create a new manager.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub(crate) fn ensure_new(&mut self, name: &'static str) {
-        self.unique_name(name);
-        self.amalgam.insert(name, Default::default());
+    pub(crate) fn ensure_queue(&self, name: &'static str) {
+        let this = &mut *self.0.borrow_mut();
+
+        this.unique_name(name);
+        this.queues.insert(name);
     }
 
-    pub(crate) fn prepare_construction(&mut self, name: &'static str) {
-        self.active.push(ListensAndEmits {
+    pub(crate) fn ensure_new(&self, name: &'static str) {
+        let this = &mut *self.0.borrow_mut();
+
+        this.unique_name(name);
+        this.amalgam.insert(name, Default::default());
+    }
+
+    pub(crate) fn prepare_construction(&self, name: &'static str) {
+        let this = &mut *self.0.borrow_mut();
+
+        this.active.push(ListensAndEmits {
             name,
             emits: Vec::new(),
             listens: Vec::new(),
         });
     }
 
-    pub(crate) fn register_emit(&mut self, signal: &'static str) {
-        let last = self.active.last_mut().unwrap();
+    pub(crate) fn register_emit(&self, signal: &'static str) {
+        let this = &mut *self.0.borrow_mut();
+
+        let last = this.active.last_mut().unwrap();
         assert!(
             last.emits.iter().find(|x| **x == signal).is_none(),
             "revent: not allowed to clone more than once per subscription: {:?}",
@@ -79,8 +102,10 @@ impl Manager {
         last.emits.push(signal);
     }
 
-    pub(crate) fn register_subscribe(&mut self, signal: &'static str) {
-        let last = self.active.last_mut().unwrap();
+    pub(crate) fn register_subscribe(&self, signal: &'static str) {
+        let this = &mut *self.0.borrow_mut();
+
+        let last = this.active.last_mut().unwrap();
         assert!(
             last.listens.iter().find(|x| **x == signal).is_none(),
             "revent: not allowed to register more than once per subscription: {:?}",
@@ -89,34 +114,36 @@ impl Manager {
         last.listens.push(signal);
     }
 
-    pub(crate) fn finish_construction(&mut self) {
-        let last = self.active.pop().unwrap();
+    pub(crate) fn finish_construction(&self) {
+        let this = &mut *self.0.borrow_mut();
+
+        let last = this.active.pop().unwrap();
 
         for item in &last.listens {
-            let emit = self.amalgam.entry(item).or_insert_with(Default::default);
+            let emit = this.amalgam.entry(item).or_insert_with(Default::default);
             for emission in &last.emits {
                 emit.insert(emission);
             }
         }
 
         for item in &last.listens {
-            let listens = self.listens.entry(item).or_insert_with(Default::default);
+            let listens = this.listens.entry(item).or_insert_with(Default::default);
             listens.insert(last.name);
         }
 
         for item in &last.emits {
-            let emits = self.emits.entry(item).or_insert_with(Default::default);
+            let emits = this.emits.entry(item).or_insert_with(Default::default);
             emits.insert(last.name);
         }
 
-        match chkrec(&self.amalgam) {
+        match chkrec(&this.amalgam) {
             Ok(()) => {}
             Err(chain) => {
                 panic!(
                     "revent: found a recursion during subscription: {}",
                     RecursionPrinter {
                         chain,
-                        manager: self,
+                        manager: &*this,
                     }
                 );
             }
@@ -126,7 +153,7 @@ impl Manager {
 
 impl Default for Manager {
     fn default() -> Self {
-        Self {
+        Self(Rc::new(RefCell::new(ManagerInternal {
             active: Default::default(),
             amalgam: Default::default(),
 
@@ -134,7 +161,7 @@ impl Default for Manager {
             listens: Default::default(),
 
             queues: Default::default(),
-        }
+        })))
     }
 }
 
@@ -176,7 +203,7 @@ fn chkrec(set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>) -> Result<(), Vec<
 
 struct RecursionPrinter<'a> {
     chain: Vec<ChannelName>,
-    manager: &'a Manager,
+    manager: &'a ManagerInternal,
 }
 
 impl<'a> Display for RecursionPrinter<'a> {
@@ -220,16 +247,16 @@ impl<'a> Display for RecursionPrinter<'a> {
 pub struct Grapher<'a> {
     invemits: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
     invlistens: BTreeMap<HandlerName, BTreeSet<ChannelName>>,
-    queues: &'a BTreeSet<ChannelName>,
+    internal: Ref<'a, ManagerInternal>,
 }
 
 impl<'a> Grapher<'a> {
     /// Create a new grapher.
     pub fn new(manager: &'a Manager) -> Self {
         Self {
-            invemits: Self::invert(&manager.emits),
-            invlistens: Self::invert(&manager.listens),
-            queues: &manager.queues,
+            invemits: Self::invert(&manager.0.borrow().emits),
+            invlistens: Self::invert(&manager.0.borrow().listens),
+            internal: manager.0.borrow(),
         }
     }
 
@@ -259,10 +286,25 @@ impl<'a> Grapher<'a> {
         }
         current
     }
+
+    /// Run `dot` on the graph to generate a `png` file.
+    pub fn graph_to_file<P: AsRef<Path>>(&self, filename: P) -> Result<(), io::Error> {
+        let filename = filename.as_ref();
+        let dot_file = filename.with_extension(".dot");
+        fs::write(&dot_file, format!("{}", self))?;
+        fs::write(
+            filename,
+            Command::new("dot")
+                .args(&[dot_file.to_str().unwrap(), "-T", "png"])
+                .output()?
+                .stdout,
+        )
+    }
 }
 
 impl<'a> Display for Grapher<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let queues = &self.internal.queues;
         writeln!(f, "strict digraph {{")?;
 
         let anchor_id = self.find_available_anchor_id();
@@ -305,9 +347,9 @@ impl<'a> Display for Grapher<'a> {
         }
         write!(f, "\t{:?}[label=<Anchor", anchor_id)?;
 
-        if !self.queues.is_empty() {
+        if !queues.is_empty() {
             write!(f, "<BR/><FONT POINT-SIZE=\"10\">")?;
-            for queue in self.queues.iter() {
+            for queue in queues.iter() {
                 write!(f, "{}<BR/>", queue)?;
             }
             write!(f, "</FONT>")?;
@@ -326,7 +368,7 @@ mod tests {
 
     #[test]
     fn simple_case() {
-        let mut mng = Manager::default();
+        let mng = Manager::new();
         mng.prepare_construction("A");
         mng.register_emit("b");
         mng.finish_construction();
@@ -350,7 +392,7 @@ mod tests {
 
     #[test]
     fn graphing_queues() {
-        let mut mng = Manager::default();
+        let mng = Manager::new();
         mng.ensure_queue("queue");
 
         let grapher = Grapher::new(&mng);

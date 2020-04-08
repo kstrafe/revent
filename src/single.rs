@@ -7,7 +7,7 @@ use std::{cell::RefCell, fmt, mem::replace, rc::Rc};
 /// exists, panicking if not present on access. In addition, no more than a single node may
 /// subscribe to this container at a time.
 pub struct Single<T: ?Sized> {
-    manager: Rc<RefCell<Manager>>,
+    manager: Manager,
     name: &'static str,
     node: Rc<RefCell<Option<Rc<RefCell<T>>>>>,
 }
@@ -19,10 +19,10 @@ impl<T: ?Sized> Single<T> {
     /// recursive (double mutable borrow) signal chains.
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
-    pub fn new(name: &'static str, manager: Rc<RefCell<Manager>>) -> Self {
-        manager.borrow_mut().ensure_new(name);
+    pub fn new(name: &'static str, manager: &Manager) -> Self {
+        manager.ensure_new(name);
         Self {
-            manager,
+            manager: manager.clone(),
             name,
             node: Rc::new(RefCell::new(None)),
         }
@@ -58,12 +58,11 @@ impl<T: ?Sized> Single<T> {
     /// registered with this `Single`.
     pub fn register(&mut self, item: Rc<RefCell<T>>) {
         assert_active_manager(&self.manager);
-        let mut mng = self.manager.borrow_mut();
         crate::STACK.with(|x| {
             let mode = x.borrow_mut().last().unwrap().0;
             match mode {
                 Mode::Adding => {
-                    mng.register_subscribe(self.name);
+                    self.manager.register_subscribe(self.name);
                     assert!(
                         replace(&mut *self.node.borrow_mut(), Some(item)).is_none(),
                         "revent: unable to register multiple items simultaneously: {:?}",
@@ -86,7 +85,7 @@ impl<T: ?Sized> Clone for Single<T> {
     /// Cloning is only valid from within an [Anchor::subscribe](crate::Anchor::subscribe) context.
     fn clone(&self) -> Self {
         assert_active_manager(&self.manager);
-        self.manager.borrow_mut().register_emit(self.name);
+        self.manager.register_emit(self.name);
         Self {
             manager: self.manager.clone(),
             name: self.name,
@@ -126,8 +125,7 @@ mod tests {
         trait Interface {}
         impl Interface for () {}
 
-        let mut signal: Single<dyn Interface> =
-            Single::new("signal", Rc::new(RefCell::new(Manager::default())));
+        let mut signal: Single<dyn Interface> = Single::new("signal", &Manager::new());
 
         signal.register(Rc::new(RefCell::new(())));
     }
@@ -138,8 +136,7 @@ mod tests {
         trait Interface {}
         impl Interface for () {}
 
-        let signal: Single<dyn Interface> =
-            Single::new("signal", Rc::new(RefCell::new(Manager::default())));
+        let signal: Single<dyn Interface> = Single::new("signal", &Manager::new());
 
         let _ = signal.clone();
     }
@@ -154,16 +151,16 @@ mod tests {
 
         struct MyAnchor {
             signal_a: Single<dyn Interface>,
-            manager: Rc<RefCell<Manager>>,
+            manager: Manager,
         }
 
         let mut hub = MyAnchor {
-            signal_a: Single::new("signal_a", Rc::new(RefCell::new(Manager::default()))),
-            manager: Rc::new(RefCell::new(Manager::default())),
+            signal_a: Single::new("signal_a", &Manager::new()),
+            manager: Manager::new(),
         };
 
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.manager
             }
         }
@@ -198,19 +195,19 @@ mod tests {
 
         struct MyAnchor {
             signal_a: Single<dyn Interface>,
-            manager: Rc<RefCell<Manager>>,
+            manager: Manager,
         }
 
         let mut hub = {
-            let manager = Rc::new(RefCell::new(Manager::default()));
+            let manager = Manager::new();
             MyAnchor {
-                signal_a: Single::new("signal_a", manager.clone()),
+                signal_a: Single::new("signal_a", &manager),
                 manager,
             }
         };
 
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.manager
             }
         }
@@ -244,19 +241,19 @@ mod tests {
 
         struct MyAnchor {
             signal_a: Single<dyn Interface>,
-            manager: Rc<RefCell<Manager>>,
+            manager: Manager,
         }
 
         let mut hub = {
-            let manager = Rc::new(RefCell::new(Manager::default()));
+            let manager = Manager::new();
             MyAnchor {
-                signal_a: Single::new("signal_a", manager.clone()),
+                signal_a: Single::new("signal_a", &manager),
                 manager,
             }
         };
 
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.manager
             }
         }
@@ -269,10 +266,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
     fn double_subscription() {
-        let mng = Rc::new(RefCell::new(Manager::default()));
+        let mng = Manager::new();
 
-        Single::<()>::new("signal", mng.clone());
-        Single::<()>::new("signal", mng);
+        Single::<()>::new("signal", &mng);
+        Single::<()>::new("signal", &mng);
     }
 
     #[test]
@@ -285,19 +282,19 @@ mod tests {
 
         struct MyAnchor {
             signal_a: Single<dyn Interface>,
-            manager: Rc<RefCell<Manager>>,
+            manager: Manager,
         }
 
         let mut hub = {
-            let manager = Rc::new(RefCell::new(Manager::default()));
+            let manager = Manager::new();
             MyAnchor {
-                signal_a: Single::new("signal_a", manager.clone()),
+                signal_a: Single::new("signal_a", &manager),
                 manager,
             }
         };
 
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.manager
             }
         }

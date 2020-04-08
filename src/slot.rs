@@ -5,7 +5,7 @@ use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 ///
 /// A `slot` is a list in which one can store node handles.
 pub struct Slot<T: ?Sized> {
-    manager: Rc<RefCell<Manager>>,
+    manager: Manager,
     name: &'static str,
     nodes: Rc<RefCell<Vec<Rc<RefCell<T>>>>>,
 }
@@ -17,10 +17,10 @@ impl<T: ?Sized> Slot<T> {
     /// recursive (double mutable borrow) signal chains.
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
-    pub fn new(name: &'static str, manager: Rc<RefCell<Manager>>) -> Self {
-        manager.borrow_mut().ensure_new(name);
+    pub fn new(name: &'static str, manager: &Manager) -> Self {
+        manager.ensure_new(name);
         Self {
-            manager,
+            manager: manager.clone(),
             name,
             nodes: Rc::new(RefCell::new(Vec::new())),
         }
@@ -80,12 +80,11 @@ impl<T: ?Sized> Slot<T> {
     /// [Anchor::subscribe](crate::Anchor::subscribe).
     pub fn register(&mut self, item: Rc<RefCell<T>>) {
         assert_active_manager(&self.manager);
-        let mut mng = self.manager.borrow_mut();
         crate::STACK.with(|x| {
             let mode = x.borrow_mut().last().unwrap().0;
             match mode {
                 Mode::Adding => {
-                    mng.register_subscribe(self.name);
+                    self.manager.register_subscribe(self.name);
                     self.nodes.borrow_mut().push(item);
                 }
                 Mode::Removing => {
@@ -115,7 +114,7 @@ impl<T: ?Sized> Clone for Slot<T> {
     /// Cloning is only valid from within an [Anchor::subscribe](crate::Anchor::subscribe) context.
     fn clone(&self) -> Self {
         assert_active_manager(&self.manager);
-        self.manager.borrow_mut().register_emit(self.name);
+        self.manager.register_emit(self.name);
         Self {
             manager: self.manager.clone(),
             name: self.name,
@@ -154,8 +153,7 @@ mod tests {
         trait Interface {}
         impl Interface for () {}
 
-        let mut signal: Slot<dyn Interface> =
-            Slot::new("signal", Rc::new(RefCell::new(Manager::default())));
+        let mut signal: Slot<dyn Interface> = Slot::new("signal", &Manager::new());
 
         signal.register(Rc::new(RefCell::new(())));
     }
@@ -166,8 +164,7 @@ mod tests {
         trait Interface {}
         impl Interface for () {}
 
-        let signal: Slot<dyn Interface> =
-            Slot::new("signal", Rc::new(RefCell::new(Manager::default())));
+        let signal: Slot<dyn Interface> = Slot::new("signal", &Manager::new());
 
         let _ = signal.clone();
     }
@@ -182,16 +179,16 @@ mod tests {
 
         struct MyAnchor {
             signal_a: Slot<dyn Interface>,
-            manager: Rc<RefCell<Manager>>,
+            manager: Manager,
         }
 
         let mut hub = MyAnchor {
-            signal_a: Slot::new("signal_a", Rc::new(RefCell::new(Manager::default()))),
-            manager: Rc::new(RefCell::new(Manager::default())),
+            signal_a: Slot::new("signal_a", &Manager::new()),
+            manager: Manager::new(),
         };
 
         impl Anchor for MyAnchor {
-            fn manager(&self) -> &Rc<RefCell<Manager>> {
+            fn manager(&self) -> &Manager {
                 &self.manager
             }
         }
@@ -217,9 +214,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
     fn double_subscription() {
-        let mng = Rc::new(RefCell::new(Manager::default()));
+        let mng = &Manager::new();
 
-        Slot::<()>::new("signal", mng.clone());
+        Slot::<()>::new("signal", mng);
         Slot::<()>::new("signal", mng);
     }
 }

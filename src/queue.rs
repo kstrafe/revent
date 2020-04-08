@@ -3,16 +3,16 @@ use std::{cell::RefCell, mem::replace, rc::Rc};
 
 /// Receiver slot. A slot that stores specific messages.
 pub struct Receiver<T> {
-    manager: Rc<RefCell<Manager>>,
+    manager: Manager,
     nodes: Rc<RefCell<Vec<T>>>,
 }
 
 impl<T> Receiver<T> {
     /// Create a new receiver object.
-    pub fn new(name: &'static str, manager: Rc<RefCell<Manager>>) -> Self {
-        manager.borrow_mut().ensure_queue(name);
+    pub fn new(name: &'static str, manager: &Manager) -> Self {
+        manager.ensure_queue(name);
         Self {
-            manager,
+            manager: manager.clone(),
             nodes: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -54,14 +54,13 @@ impl<T> Sender<T> {
 #[cfg(test)]
 mod tests {
     use crate::{Manager, Receiver};
-    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     #[should_panic(expected = "revent: name is already registered to this manager: \"receiver\"")]
     fn double_receiver() {
-        let mng = Rc::new(RefCell::new(Manager::new()));
+        let mng = Manager::new();
 
-        Receiver::<()>::new("receiver", mng.clone());
-        Receiver::<()>::new("receiver", mng);
+        Receiver::<()>::new("receiver", &mng);
+        Receiver::<()>::new("receiver", &mng);
     }
 }

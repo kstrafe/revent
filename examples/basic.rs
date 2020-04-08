@@ -1,4 +1,4 @@
-use revent::{Anchor, Manager, Node, Slot};
+use revent::{Anchor, Grapher, Manager, Node, Slot};
 use std::{cell::RefCell, rc::Rc};
 
 // 1. Define your events using traits.
@@ -14,12 +14,12 @@ pub trait EventHandler {
 #[derive(Debug)]
 struct MyAnchor {
     basic: Slot<dyn EventHandler>,
-    manager: Rc<RefCell<Manager>>,
+    manager: Manager,
 }
 
 // 2a. The node only needs to implement `manager`.
 impl Anchor for MyAnchor {
-    fn manager(&self) -> &Rc<RefCell<Manager>> {
+    fn manager(&self) -> &Manager {
         &self.manager
     }
 }
@@ -27,9 +27,9 @@ impl Anchor for MyAnchor {
 // 2b. Construct the new node. A manager must be supplied to all slots.
 impl MyAnchor {
     fn new() -> Self {
-        let manager = Rc::new(RefCell::new(Manager::new()));
+        let manager = Manager::new();
         Self {
-            basic: Slot::new("basic", manager.clone()),
+            basic: Slot::new("basic", &manager),
             manager,
         }
     }
@@ -87,4 +87,12 @@ fn main() {
     // To showcase how we can remove subscribers, just insert the item returned from `subscribe`.
     // This uses the item's `register_listens` method to figure out which slots to unsubscribe from.
     hub.unsubscribe(&item);
+
+    // 9. Write a picture of the graph to disk.
+    //
+    // Can be done right after all `subscribe` calls have finished. Unsubscribing does not remove
+    // nodes from the generated graph.
+    Grapher::new(hub.manager())
+        .graph_to_file("target/basic.png")
+        .unwrap();
 }
