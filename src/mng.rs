@@ -296,16 +296,15 @@ impl<'a> Grapher<'a> {
         inverse
     }
 
-    fn find_available_anchor_id(&self) -> String {
-        let mut current = String::from("Anchor#0");
-        let mut count = 0;
+    fn find_available_anchor_id(&self, mut count_start: usize) -> (String, usize) {
+        let mut current = format!("Anchor#{}", count_start);
 
         while self.invlistens.contains_key(&current[..]) || self.invemits.contains_key(&current[..])
         {
-            count += 1;
-            current = String::from("Anchor#") + &count.to_string();
+            count_start += 1;
+            current = format!("Anchor#{}", count_start);
         }
-        current
+        (current, count_start)
     }
 
     /// Run `dot` on the graph to generate a `png` file.
@@ -327,14 +326,12 @@ impl<'a> Display for Grapher<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "strict digraph {{")?;
 
-        let anchor_id = self.find_available_anchor_id();
+        let mut anchor_count = 0;
         let mut colors = [
             "#3D9970", "#85144B", "#0074D9", "#2ECC40", "#FF4136", "#111111",
         ]
         .iter()
         .cycle();
-
-        let mut any_leftovers = false;
 
         for (to, listen_channels) in &self.invlistens {
             let mut leftover = listen_channels.clone();
@@ -377,10 +374,13 @@ impl<'a> Display for Grapher<'a> {
             // We should also highlight signals coming from the root node that are not used by anyone
             // else.
             if !leftover.is_empty() {
-                any_leftovers = true;
                 let mut iter = leftover.iter();
                 let color = colors.next().unwrap();
-                write!(f, "\t{:?} -> {:?}[arrowhead=\"diamond\",color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", anchor_id, to, color, color, iter.next().unwrap())?;
+                let (anchor_name, new_count) = self.find_available_anchor_id(anchor_count);
+                anchor_count = new_count + 1;
+                anchor_count += 1;
+                write!(f, "\t{:?}[style=\"invis\"];", anchor_name)?;
+                write!(f, "\t{:?} -> {:?}[arrowhead=\"diamond\",color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", anchor_name, to, color, color, iter.next().unwrap())?;
                 for left in iter {
                     write!(f, "<BR/>{}", left)?;
                 }
@@ -388,10 +388,6 @@ impl<'a> Display for Grapher<'a> {
             }
         }
 
-        if any_leftovers {
-            write!(f, "\t{:?}[label=<Anchor", anchor_id)?;
-            write!(f, ">];")?;
-        }
         write!(f, "\n}}")?;
 
         Ok(())
@@ -466,7 +462,7 @@ mod tests {
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            "strict digraph {\n\t\"Anchor#0\" -> \"A\"[arrowhead=\"diamond\",color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">a</FONT>>];\n\t\"Anchor#0\"[label=<Anchor>];\n}"
+            "strict digraph {\n\t\"Anchor#0\"[style=\"invis\"];\t\"Anchor#0\" -> \"A\"[arrowhead=\"diamond\",color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">a</FONT>>];\n\n}"
         );
     }
 }
