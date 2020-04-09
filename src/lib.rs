@@ -712,7 +712,7 @@ mod tests {
             fn new() -> Self {
                 let mng = Manager::new();
                 Self {
-                    queue: Feed::new("queue", &mng),
+                    queue: Feed::new("queue", &mng, 1),
                     mng,
                 }
             }
@@ -767,7 +767,7 @@ mod tests {
     fn double_receiver() {
         let mng = Manager::new();
 
-        Feed::<()>::new("lorem", &mng);
+        Feed::<()>::new("lorem", &mng, 1);
         Slot::<()>::new("lorem", &mng);
     }
 
@@ -781,7 +781,7 @@ mod tests {
             fn new() -> Self {
                 let mng = Manager::new();
                 Self {
-                    feed: Feed::new("queue", &mng),
+                    feed: Feed::new("queue", &mng, 1),
                     mng,
                 }
             }
@@ -820,7 +820,7 @@ mod tests {
             fn new() -> Self {
                 let mng = Manager::new();
                 Self {
-                    queue: Feed::new("queue", &mng),
+                    queue: Feed::new("queue", &mng, 2),
                     mng,
                 }
             }
@@ -881,5 +881,147 @@ mod tests {
             assert_eq!(Some(0), sub.borrow_mut().pop());
             assert_eq!(None, sub.borrow_mut().pop());
         }
+    }
+
+    #[test]
+    fn feeder_channel_limit() {
+        struct MyAnchor {
+            queue: Feed<usize>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self {
+                    queue: Feed::new("queue", &mng, 83),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct FeederNode;
+        impl Node<MyAnchor, ()> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) {
+                anchor.queue.feeder().feed(0);
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeederNode";
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            queue: Feedee<usize>,
+        }
+        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        impl FeedeeNode {
+            fn pop(&mut self) -> Option<usize> {
+                self.queue.pop()
+            }
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        let mut subs = Vec::new();
+        for _ in 0..100 {
+            subs.push(hub.subscribe(|queue| FeedeeNode { queue }));
+        }
+        hub.subscribe(|_| FeederNode);
+
+        for sub in &subs {
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(None, sub.borrow_mut().pop());
+        }
+        hub.subscribe(|_| FeederNode);
+        hub.subscribe(|_| FeederNode);
+        for sub in subs {
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(None, sub.borrow_mut().pop());
+        }
+    }
+
+    #[test]
+    fn one_feeder_to_many_feedees_disable_enable() {
+        struct MyAnchor {
+            queue: Feed<usize>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self {
+                    queue: Feed::new("queue", &mng, 2),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct FeederNode;
+        impl Node<MyAnchor, ()> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) {
+                anchor.queue.feeder().feed(0);
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeederNode";
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            queue: Feedee<usize>,
+        }
+        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        impl FeedeeNode {
+            fn new(mut queue: Feedee<usize>, enable: bool) -> Self {
+                if !enable {
+                    queue.disable();
+                }
+                Self { queue }
+            }
+            fn pop(&mut self) -> Option<usize> {
+                self.queue.pop()
+            }
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        let sub_1 = hub.subscribe(|queue| FeedeeNode::new(queue, true));
+        let sub_2 = hub.subscribe(|queue| FeedeeNode::new(queue, false));
+
+        hub.subscribe(|_| FeederNode);
+
+        assert_eq!(Some(0), sub_1.borrow_mut().pop());
+        assert_eq!(None, sub_2.borrow_mut().pop());
     }
 }

@@ -28,7 +28,7 @@
 //!         Self {
 //!             basic_slot_1: Slot::new("basic_slot_1", &mng),
 //!             basic_slot_2: Slot::new("basic_slot_2", &mng),
-//!             feedback: Feed::new("feedback", &mng),
+//!             feedback: Feed::new("feedback", &mng, 1),
 //!             mng,
 //!         }
 //!     }
@@ -112,6 +112,7 @@ type Queue<T> = Rc<RefCell<VecDeque<T>>>;
 
 /// Sender part of [Feed].
 pub struct Feeder<T: Clone> {
+    max_size: usize,
     queues: Rc<RefCell<Vec<Queue<T>>>>,
 }
 
@@ -120,22 +121,26 @@ impl<T: Clone> Feeder<T> {
     ///
     /// All [Feedee]s associated with this feeder will have the input `item` pushed onto their
     /// queues.
+    ///
+    /// # Panics #
+    ///
+    /// Panics if the queue for a [Feedee] is full.
     pub fn feed(&self, item: T) {
         let mut queues = self.queues.borrow_mut();
         if let Some((last, rest)) = queues.split_last_mut() {
             for queue in rest.iter_mut() {
-                queue.borrow_mut().push_back(item.clone());
+                let mut queue = queue.borrow_mut();
+                if queue.len() == self.max_size {
+                    panic!(
+                        "revent: feeder queue exceeds maximum size: {}",
+                        self.max_size
+                    );
+                }
+                queue.push_back(item.clone());
             }
             last.borrow_mut().push_back(item);
         }
     }
-
-    // /// Optimization of [feed](Feeder::feed) for small objects.
-    // pub fn feed_small(&self, item: T) {
-    //     for queue in self.queues.borrow_mut().iter_mut() {
-    //         queue.borrow_mut().push_back(item.clone());
-    //     }
-    // }
 }
 
 /// Receiver part of [Feed].
@@ -148,6 +153,44 @@ impl<T> Feedee<T> {
     /// Get an item from the front of the queue.
     pub fn pop(&mut self) -> Option<T> {
         self.queue.borrow_mut().pop_front()
+    }
+
+    /// Enable this receiver.
+    ///
+    /// Feedees are enabled by default.
+    ///
+    /// This function is idempotent, meaning that calling it multiple times has no effect if
+    /// the feedee is already enabled.
+    ///
+    /// # Returns #
+    ///
+    /// True if the state changed from disabled to enabled. False otherwise.
+    pub fn enable(&mut self) -> bool {
+        let mut queues = self.queues.borrow_mut();
+
+        let len_before = queues.len();
+        queues.retain(|item| !Rc::ptr_eq(item, &self.queue));
+        queues.push(self.queue.clone());
+        let len_after = queues.len();
+
+        len_before != len_after
+    }
+
+    /// Disable this receiver. The [Feeder] will not be able to push data to this queue.
+    ///
+    /// This function is idempotent, meaning that calling it multiple times has no effect if
+    /// the feedee is already disabled.
+    ///
+    /// # Returns #
+    ///
+    /// True if the state changed from enabled to disabled. False otherwise.
+    pub fn disable(&mut self) -> bool {
+        let mut queues = self.queues.borrow_mut();
+        let len_before = queues.len();
+        queues.retain(|item| !Rc::ptr_eq(item, &self.queue));
+        let len_after = queues.len();
+
+        len_before != len_after
     }
 }
 
@@ -162,16 +205,18 @@ impl<T> Drop for Feedee<T> {
 /// Feedback mechanism to provide data to [Node](crate::Node)s higher up in the revent DAG.
 pub struct Feed<T> {
     manager: Manager,
+    max_size: usize,
     name: &'static str,
     queues: Rc<RefCell<Vec<Queue<T>>>>,
 }
 
 impl<T: Clone> Feed<T> {
     /// Create a new feed.
-    pub fn new(name: &'static str, manager: &Manager) -> Self {
+    pub fn new(name: &'static str, manager: &Manager, max_size: usize) -> Self {
         manager.ensure_new(name, ChannelType::Feed);
         Self {
             manager: manager.clone(),
+            max_size,
             name,
             queues: Rc::new(RefCell::new(Vec::new())),
         }
@@ -182,6 +227,7 @@ impl<T: Clone> Feed<T> {
         assert_active_manager(&self.manager);
         self.manager.register_emit(self.name);
         Feeder {
+            max_size: self.max_size,
             queues: self.queues.clone(),
         }
     }
@@ -212,7 +258,7 @@ mod tests {
     fn double_receiver() {
         let mng = Manager::new();
 
-        Feed::<()>::new("feed", &mng);
-        Feed::<()>::new("feed", &mng);
+        Feed::<()>::new("feed", &mng, 1);
+        Feed::<()>::new("feed", &mng, 1);
     }
 }
