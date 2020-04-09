@@ -11,20 +11,20 @@ mod setup {
 
     pub struct MyAnchor {
         pub basic: Slot<dyn EventHandler>,
-        pub manager: Rc<RefCell<Manager>>,
+        pub manager: Manager,
     }
 
     impl Anchor for MyAnchor {
-        fn manager(&self) -> &Rc<RefCell<Manager>> {
+        fn manager(&self) -> &Manager {
             &self.manager
         }
     }
 
     impl MyAnchor {
         pub fn new() -> Self {
-            let manager = Rc::new(RefCell::new(Manager::new()));
+            let manager = Manager::new();
             Self {
-                basic: Slot::new("basic", manager.clone()),
+                basic: Slot::new("basic", &manager),
                 manager,
             }
         }

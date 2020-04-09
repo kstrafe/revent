@@ -118,13 +118,24 @@ pub struct Feeder<T: Clone> {
 impl<T: Clone> Feeder<T> {
     /// Push an item to this queue.
     ///
-    /// All [Feedee] associated with this feeder will have the input `item` pushed onto their
+    /// All [Feedee]s associated with this feeder will have the input `item` pushed onto their
     /// queues.
     pub fn feed(&self, item: T) {
-        for queue in self.queues.borrow_mut().iter_mut() {
-            queue.borrow_mut().push_back(item.clone());
+        let mut queues = self.queues.borrow_mut();
+        if let Some((last, rest)) = queues.split_last_mut() {
+            for queue in rest.iter_mut() {
+                queue.borrow_mut().push_back(item.clone());
+            }
+            last.borrow_mut().push_back(item);
         }
     }
+
+    // /// Optimization of [feed](Feeder::feed) for small objects.
+    // pub fn feed_small(&self, item: T) {
+    //     for queue in self.queues.borrow_mut().iter_mut() {
+    //         queue.borrow_mut().push_back(item.clone());
+    //     }
+    // }
 }
 
 /// Receiver part of [Feed].
