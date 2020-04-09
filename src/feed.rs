@@ -193,7 +193,7 @@ impl<T: Clone> Feed<T> {
     /// other.
     pub fn feedee(&self) -> Feedee<T> {
         assert_active_manager(&self.manager);
-        self.manager.register_subscribe(self.name);
+        self.manager.register_listen(self.name);
         let queue = Rc::new(RefCell::new(VecDeque::new()));
         self.queues.borrow_mut().push(queue.clone());
         Feedee {

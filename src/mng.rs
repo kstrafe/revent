@@ -152,7 +152,7 @@ impl Manager {
         last.emits.push(signal);
     }
 
-    pub(crate) fn register_subscribe(&self, signal: &'static str) {
+    pub(crate) fn register_listen(&self, signal: &'static str) {
         let this = &mut *self.0.borrow_mut();
 
         let last = this.active.last_mut().unwrap();
@@ -410,12 +410,12 @@ mod tests {
         mng.finish_construction();
 
         mng.prepare_construction("B");
-        mng.register_subscribe("b");
+        mng.register_listen("b");
         mng.register_emit("c");
         mng.finish_construction();
 
         mng.prepare_construction("C");
-        mng.register_subscribe("b");
+        mng.register_listen("b");
         mng.register_emit("c");
         mng.finish_construction();
 
@@ -434,11 +434,11 @@ mod tests {
 
         mng.prepare_construction("A");
         mng.register_emit("a");
-        mng.register_subscribe("b");
+        mng.register_listen("b");
         mng.finish_construction();
 
         mng.prepare_construction("B");
-        mng.register_subscribe("a");
+        mng.register_listen("a");
         mng.register_emit("b");
         mng.finish_construction();
 
@@ -455,7 +455,7 @@ mod tests {
         mng.ensure_new("a", ChannelType::Direct);
 
         mng.prepare_construction("A");
-        mng.register_subscribe("a");
+        mng.register_listen("a");
         mng.finish_construction();
 
         let grapher = Grapher::new(&mng);

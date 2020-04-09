@@ -62,7 +62,7 @@ impl<T: ?Sized> Single<T> {
             let mode = x.borrow_mut().last().unwrap().0;
             match mode {
                 Mode::Adding => {
-                    self.manager.register_subscribe(self.name);
+                    self.manager.register_listen(self.name);
                     assert!(
                         replace(&mut *self.node.borrow_mut(), Some(item)).is_none(),
                         "revent: unable to register multiple items simultaneously: {:?}",

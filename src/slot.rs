@@ -138,7 +138,7 @@ impl<T: ?Sized> Slot<T> {
             let mode = x.borrow_mut().last().unwrap().0;
             match mode {
                 Mode::Adding => {
-                    self.manager.register_subscribe(self.name);
+                    self.manager.register_listen(self.name);
                     self.nodes.borrow_mut().push(item);
                 }
                 Mode::Removing => {
