@@ -108,7 +108,19 @@
 use crate::{assert_active_manager, ChannelType, Manager};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-type Queue<T> = Rc<RefCell<VecDeque<T>>>;
+struct Queue<T> {
+    items: Rc<RefCell<VecDeque<T>>>,
+    name: &'static str,
+}
+
+impl<T> Clone for Queue<T> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            name: self.name,
+        }
+    }
+}
 
 /// Sender part of [Feed].
 pub struct Feeder<T: Clone> {
@@ -129,16 +141,16 @@ impl<T: Clone> Feeder<T> {
         let mut queues = self.queues.borrow_mut();
         if let Some((last, rest)) = queues.split_last_mut() {
             for queue in rest.iter_mut() {
-                let mut queue = queue.borrow_mut();
+                let (mut queue, name) = (queue.items.borrow_mut(), queue.name);
                 if queue.len() == self.max_size {
                     panic!(
-                        "revent: feeder queue exceeds maximum size: {}",
-                        self.max_size
+                        "revent: feedee queue exceeds maximum size: {}, feedee: {}",
+                        self.max_size, name,
                     );
                 }
                 queue.push_back(item.clone());
             }
-            last.borrow_mut().push_back(item);
+            last.items.borrow_mut().push_back(item);
         }
     }
 }
@@ -152,7 +164,7 @@ pub struct Feedee<T> {
 impl<T> Feedee<T> {
     /// Get an item from the front of the queue.
     pub fn pop(&mut self) -> Option<T> {
-        self.queue.borrow_mut().pop_front()
+        self.queue.items.borrow_mut().pop_front()
     }
 
     /// Enable this receiver.
@@ -169,7 +181,7 @@ impl<T> Feedee<T> {
         let mut queues = self.queues.borrow_mut();
 
         let len_before = queues.len();
-        queues.retain(|item| !Rc::ptr_eq(item, &self.queue));
+        queues.retain(|item| !Rc::ptr_eq(&item.items, &self.queue.items));
         queues.push(self.queue.clone());
         let len_after = queues.len();
 
@@ -187,7 +199,7 @@ impl<T> Feedee<T> {
     pub fn disable(&mut self) -> bool {
         let mut queues = self.queues.borrow_mut();
         let len_before = queues.len();
-        queues.retain(|item| !Rc::ptr_eq(item, &self.queue));
+        queues.retain(|item| !Rc::ptr_eq(&item.items, &self.queue.items));
         let len_after = queues.len();
 
         len_before != len_after
@@ -198,7 +210,7 @@ impl<T> Drop for Feedee<T> {
     fn drop(&mut self) {
         self.queues
             .borrow_mut()
-            .retain(|item| !Rc::ptr_eq(item, &self.queue));
+            .retain(|item| !Rc::ptr_eq(&item.items, &self.queue.items));
     }
 }
 
@@ -240,7 +252,10 @@ impl<T: Clone> Feed<T> {
     pub fn feedee(&self) -> Feedee<T> {
         assert_active_manager(&self.manager);
         self.manager.register_listen(self.name);
-        let queue = Rc::new(RefCell::new(VecDeque::new()));
+        let queue = Queue {
+            items: Rc::new(RefCell::new(VecDeque::new())),
+            name: self.manager.current(),
+        };
         self.queues.borrow_mut().push(queue.clone());
         Feedee {
             queues: self.queues.clone(),

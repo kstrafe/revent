@@ -189,7 +189,7 @@ fn assert_active_manager(manager: &Manager) {
 #[cfg(test)]
 mod tests {
     use crate::{
-        feed::{Feed, Feedee},
+        feed::{Feed, Feedee, Feeder},
         Anchor, Manager, Node, Single, Slot,
     };
     use std::{cell::RefCell, rc::Rc};
@@ -884,6 +884,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "revent: feedee queue exceeds maximum size: 1, feedee: FeedeeNode")]
     fn feeder_channel_limit() {
         struct MyAnchor {
             queue: Feed<usize>,
@@ -893,7 +894,7 @@ mod tests {
             fn new() -> Self {
                 let mng = Manager::new();
                 Self {
-                    queue: Feed::new("queue", &mng, 83),
+                    queue: Feed::new("queue", &mng, 1),
                     mng,
                 }
             }
@@ -953,6 +954,69 @@ mod tests {
             assert_eq!(Some(0), sub.borrow_mut().pop());
             assert_eq!(Some(0), sub.borrow_mut().pop());
             assert_eq!(None, sub.borrow_mut().pop());
+        }
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn feed_size_checks(max_size: usize) {
+        struct MyAnchor {
+            queue: Feed<()>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new(max_size: usize) -> Self {
+                let mng = Manager::new();
+                Self {
+                    queue: Feed::new("queue", &mng, max_size),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct FeederNode {
+            queue: Feeder<()>,
+        }
+        impl Node<MyAnchor, Feeder<()>> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) -> Feeder<()> {
+                anchor.queue.feeder()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeederNode";
+        }
+        impl FeederNode {
+            fn push(&mut self) {
+                self.queue.feed(());
+            }
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            _queue: Feedee<()>,
+        }
+        impl Node<MyAnchor, Feedee<()>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<()> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new(max_size);
+        let _feedee = hub.subscribe(|queue| FeedeeNode { _queue: queue });
+        let feeder = hub.subscribe(|queue| FeederNode { queue });
+
+        for _ in 0..max_size {
+            feeder.borrow_mut().push();
         }
     }
 

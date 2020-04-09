@@ -123,6 +123,11 @@ impl Manager {
         Self::default()
     }
 
+    pub(crate) fn current(&self) -> HandlerName {
+        let this = &mut *self.0.borrow_mut();
+        this.active.last().unwrap().name
+    }
+
     pub(crate) fn ensure_new(&self, name: &'static str, channel_type: ChannelType) {
         let this = &mut *self.0.borrow_mut();
 
