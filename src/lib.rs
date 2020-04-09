@@ -885,6 +885,60 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "revent: feedee queue exceeds maximum size: 1, feedee: FeedeeNode")]
+    fn feeder_channel_limit_single() {
+        struct MyAnchor {
+            queue: Feed<usize>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self {
+                    queue: Feed::new("queue", &mng, 1),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct FeederNode;
+        impl Node<MyAnchor, ()> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) {
+                anchor.queue.feeder().feed(0);
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeederNode";
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            _queue: Feedee<usize>,
+        }
+        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        let _feedee = hub.subscribe(|queue| FeedeeNode { _queue: queue });
+        hub.subscribe(|_| FeederNode);
+        hub.subscribe(|_| FeederNode);
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: feedee queue exceeds maximum size: 1, feedee: FeedeeNode")]
     fn feeder_channel_limit() {
         struct MyAnchor {
             queue: Feed<usize>,

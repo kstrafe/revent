@@ -150,7 +150,15 @@ impl<T: Clone> Feeder<T> {
                 }
                 queue.push_back(item.clone());
             }
-            last.items.borrow_mut().push_back(item);
+
+            let (mut queue, name) = (last.items.borrow_mut(), last.name);
+            if queue.len() == self.max_size {
+                panic!(
+                    "revent: feedee queue exceeds maximum size: {}, feedee: {}",
+                    self.max_size, name,
+                );
+            }
+            queue.push_back(item);
         }
     }
 }
