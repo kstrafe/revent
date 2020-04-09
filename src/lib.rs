@@ -809,4 +809,77 @@ mod tests {
         let mut hub = MyAnchor::new();
         hub.subscribe(|_| MyNode);
     }
+
+    #[test]
+    fn one_feeder_to_many_feedees() {
+        struct MyAnchor {
+            queue: Feed<usize>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self {
+                    queue: Feed::new("queue", &mng),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct FeederNode;
+        impl Node<MyAnchor, ()> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) {
+                anchor.queue.feeder().feed(0);
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeederNode";
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            queue: Feedee<usize>,
+        }
+        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        impl FeedeeNode {
+            fn pop(&mut self) -> Option<usize> {
+                self.queue.pop()
+            }
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        let mut subs = Vec::new();
+        for _ in 0..100 {
+            subs.push(hub.subscribe(|queue| FeedeeNode { queue }));
+        }
+        hub.subscribe(|_| FeederNode);
+
+        for sub in &subs {
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(None, sub.borrow_mut().pop());
+        }
+        hub.subscribe(|_| FeederNode);
+        hub.subscribe(|_| FeederNode);
+        for sub in subs {
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(Some(0), sub.borrow_mut().pop());
+            assert_eq!(None, sub.borrow_mut().pop());
+        }
+    }
 }
