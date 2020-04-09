@@ -1,4 +1,4 @@
-use crate::{assert_active_manager, Manager, Mode};
+use crate::{assert_active_manager, ChannelType, Manager, Mode};
 use std::{cell::RefCell, fmt, mem::replace, rc::Rc};
 
 /// Single slot containing `T`.
@@ -20,7 +20,7 @@ impl<T: ?Sized> Single<T> {
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
     pub fn new(name: &'static str, manager: &Manager) -> Self {
-        manager.ensure_new(name);
+        manager.ensure_new(name, ChannelType::Direct);
         Self {
             manager: manager.clone(),
             name,

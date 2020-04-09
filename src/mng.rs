@@ -24,9 +24,24 @@ struct ListensAndEmits {
     listens: Vec<ChannelName>,
 }
 
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum ChannelType {
+    Direct,
+    Feed,
+}
+
+impl ChannelType {
+    fn is_direct(&self) -> bool {
+        match self {
+            ChannelType::Direct => true,
+            _ => false,
+        }
+    }
+}
+
 /// Inspects how various [Node](crate::Node)s use slots.
 ///
-/// Manager is active when subscribing to [Anchor]. It inspects the various listens and emits and
+/// Manager is active when subscribing to [Anchor](crate::Anchor). It inspects the various listens and emits and
 /// ensures that there are no cycles created between nodes.
 ///
 /// Unsubscribing items does not remove the channel dependencies from the manager. This is
@@ -47,16 +62,58 @@ pub(crate) struct ManagerInternal {
     emits: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
     listens: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
 
-    queues: BTreeSet<ChannelName>,
+    channel_types: BTreeMap<ChannelName, ChannelType>,
 }
 
 impl ManagerInternal {
     fn unique_name(&self, name: &'static str) {
         assert!(
-            !self.queues.contains(name) && !self.amalgam.contains_key(name),
+            !self.channel_types.contains_key(name),
             "revent: name is already registered to this manager: {:?}",
             name
         );
+    }
+
+    fn chkrec(&self) -> Result<(), Vec<ChannelName>> {
+        let set = &self.amalgam;
+        fn chkreci(
+            now: ChannelName,
+            set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>,
+            chain: &mut Vec<ChannelName>,
+            channel_types: &BTreeMap<ChannelName, ChannelType>,
+        ) -> Result<(), ()> {
+            if let Some(node) = set.get(&now) {
+                for signal in node
+                    .iter()
+                    .filter(|x| channel_types.get(*x).unwrap().is_direct())
+                {
+                    if chain.contains(&signal) {
+                        chain.push(signal);
+                        while &chain[0] != signal {
+                            chain.remove(0);
+                        }
+                        return Err(());
+                    }
+                    chain.push(*signal);
+                    chkreci(signal, set, chain, channel_types)?;
+                    chain.pop();
+                }
+            }
+            Ok(())
+        }
+
+        let mut chain = Vec::new();
+        for signal in set
+            .keys()
+            .filter(|x| self.channel_types.get(*x).unwrap().is_direct())
+        {
+            chain.push(*signal);
+            if let Err(()) = chkreci(signal, set, &mut chain, &self.channel_types) {
+                return Err(chain);
+            }
+            chain.pop();
+        }
+        Ok(())
     }
 }
 
@@ -66,18 +123,11 @@ impl Manager {
         Self::default()
     }
 
-    pub(crate) fn ensure_queue(&self, name: &'static str) {
+    pub(crate) fn ensure_new(&self, name: &'static str, channel_type: ChannelType) {
         let this = &mut *self.0.borrow_mut();
 
         this.unique_name(name);
-        this.queues.insert(name);
-    }
-
-    pub(crate) fn ensure_new(&self, name: &'static str) {
-        let this = &mut *self.0.borrow_mut();
-
-        this.unique_name(name);
-        this.amalgam.insert(name, Default::default());
+        this.channel_types.insert(name, channel_type);
     }
 
     pub(crate) fn prepare_construction(&self, name: &'static str) {
@@ -136,7 +186,7 @@ impl Manager {
             emits.insert(last.name);
         }
 
-        match chkrec(&this.amalgam) {
+        match this.chkrec() {
             Ok(()) => {}
             Err(chain) => {
                 panic!(
@@ -160,43 +210,9 @@ impl Default for Manager {
             emits: Default::default(),
             listens: Default::default(),
 
-            queues: Default::default(),
+            channel_types: Default::default(),
         })))
     }
-}
-
-fn chkrec(set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>) -> Result<(), Vec<ChannelName>> {
-    fn chkreci(
-        now: ChannelName,
-        set: &BTreeMap<ChannelName, BTreeSet<ChannelName>>,
-        chain: &mut Vec<ChannelName>,
-    ) -> Result<(), ()> {
-        if let Some(node) = set.get(&now) {
-            for signal in node.iter() {
-                if chain.contains(&signal) {
-                    chain.push(signal);
-                    while &chain[0] != signal {
-                        chain.remove(0);
-                    }
-                    return Err(());
-                }
-                chain.push(*signal);
-                chkreci(signal, set, chain)?;
-                chain.pop();
-            }
-        }
-        Ok(())
-    }
-
-    let mut chain = Vec::new();
-    for signal in set.keys() {
-        chain.push(*signal);
-        if let Err(()) = chkreci(signal, set, &mut chain) {
-            return Err(chain);
-        }
-        chain.pop();
-    }
-    Ok(())
 }
 
 // ---
@@ -290,7 +306,7 @@ impl<'a> Grapher<'a> {
     /// Run `dot` on the graph to generate a `png` file.
     pub fn graph_to_file<P: AsRef<Path>>(&self, filename: P) -> Result<(), io::Error> {
         let filename = filename.as_ref();
-        let dot_file = filename.with_extension(".dot");
+        let dot_file = filename.with_extension("dot");
         fs::write(&dot_file, format!("{}", self))?;
         fs::write(
             filename,
@@ -304,7 +320,6 @@ impl<'a> Grapher<'a> {
 
 impl<'a> Display for Grapher<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let queues = &self.internal.queues;
         writeln!(f, "strict digraph {{")?;
 
         let anchor_id = self.find_available_anchor_id();
@@ -314,6 +329,8 @@ impl<'a> Display for Grapher<'a> {
         .iter()
         .cycle();
 
+        let mut any_leftovers = false;
+
         for (to, listen_channels) in &self.invlistens {
             let mut leftover = listen_channels.clone();
             for (from, emit_channels) in &self.invemits {
@@ -322,20 +339,40 @@ impl<'a> Display for Grapher<'a> {
                     .collect::<Vec<_>>();
                 leftover = leftover.difference(emit_channels).cloned().collect();
                 if !merged.is_empty() {
-                    let mut merged_iter = merged.iter();
-                    let color = colors.next().unwrap();
-                    write!(f, "\t{:?} -> {:?}[color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", from, to, color, color, merged_iter.next().unwrap())?;
+                    // Create direct links first
+                    let mut merged_iter = merged
+                        .iter()
+                        .filter(|&x| self.internal.channel_types.get(*x).unwrap().is_direct());
 
-                    for item in merged_iter {
-                        write!(f, "<BR/>{}", item)?;
+                    if let Some(item) = merged_iter.next() {
+                        let color = colors.next().unwrap();
+                        write!(f, "\t{:?} -> {:?}[color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", from, to, color, color, item)?;
+
+                        for item in merged_iter {
+                            write!(f, "<BR/>{}", item)?;
+                        }
+                        writeln!(f, "</FONT>>];")?;
                     }
-                    writeln!(f, "</FONT>>];")?;
+
+                    let mut merged_iter = merged
+                        .iter()
+                        .filter(|&x| !self.internal.channel_types.get(*x).unwrap().is_direct());
+                    if let Some(item) = merged_iter.next() {
+                        let color = colors.next().unwrap();
+                        write!(f, "\t{:?} -> {:?}[color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", from, to, color, color, item)?;
+
+                        for item in merged_iter {
+                            write!(f, "<BR/>{}", item)?;
+                        }
+                        writeln!(f, "</FONT>>,style=\"dashed\"];")?;
+                    }
                 }
             }
 
             // We should also highlight signals coming from the root node that are not used by anyone
             // else.
             if !leftover.is_empty() {
+                any_leftovers = true;
                 let mut iter = leftover.iter();
                 let color = colors.next().unwrap();
                 write!(f, "\t{:?} -> {:?}[arrowhead=\"diamond\",color={:?},fontcolor={:?},label=<<FONT POINT-SIZE=\"10\">{}", anchor_id, to, color, color, iter.next().unwrap())?;
@@ -345,16 +382,12 @@ impl<'a> Display for Grapher<'a> {
                 writeln!(f, "</FONT>>];")?;
             }
         }
-        write!(f, "\t{:?}[label=<Anchor", anchor_id)?;
 
-        if !queues.is_empty() {
-            write!(f, "<BR/><FONT POINT-SIZE=\"10\">")?;
-            for queue in queues.iter() {
-                write!(f, "{}<BR/>", queue)?;
-            }
-            write!(f, "</FONT>")?;
+        if any_leftovers {
+            write!(f, "\t{:?}[label=<Anchor", anchor_id)?;
+            write!(f, ">];")?;
         }
-        write!(f, ">];\n}}")?;
+        write!(f, "\n}}")?;
 
         Ok(())
     }
@@ -369,6 +402,9 @@ mod tests {
     #[test]
     fn simple_case() {
         let mng = Manager::new();
+        mng.ensure_new("b", ChannelType::Direct);
+        mng.ensure_new("c", ChannelType::Direct);
+
         mng.prepare_construction("A");
         mng.register_emit("b");
         mng.finish_construction();
@@ -386,19 +422,46 @@ mod tests {
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"Anchor#0\"[label=<Anchor>];\n}"
+            "strict digraph {\n\t\"A\" -> \"B\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\t\"A\" -> \"C\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>];\n\n}"
         );
     }
 
     #[test]
-    fn graphing_queues() {
+    fn graph_feed_loop() {
         let mng = Manager::new();
-        mng.ensure_queue("queue");
+        mng.ensure_new("a", ChannelType::Direct);
+        mng.ensure_new("b", ChannelType::Feed);
+
+        mng.prepare_construction("A");
+        mng.register_emit("a");
+        mng.register_subscribe("b");
+        mng.finish_construction();
+
+        mng.prepare_construction("B");
+        mng.register_subscribe("a");
+        mng.register_emit("b");
+        mng.finish_construction();
 
         let grapher = Grapher::new(&mng);
         assert_eq!(
             format!("{}", grapher),
-            "strict digraph {\n\t\"Anchor#0\"[label=<Anchor<BR/><FONT POINT-SIZE=\"10\">queue<BR/></FONT>>];\n}"
+            "strict digraph {\n\t\"B\" -> \"A\"[color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">b</FONT>>,style=\"dashed\"];\n\t\"A\" -> \"B\"[color=\"#85144B\",fontcolor=\"#85144B\",label=<<FONT POINT-SIZE=\"10\">a</FONT>>];\n\n}"
+        );
+    }
+
+    #[test]
+    fn include_anchor_if_signals_unaccounted() {
+        let mng = Manager::new();
+        mng.ensure_new("a", ChannelType::Direct);
+
+        mng.prepare_construction("A");
+        mng.register_subscribe("a");
+        mng.finish_construction();
+
+        let grapher = Grapher::new(&mng);
+        assert_eq!(
+            format!("{}", grapher),
+            "strict digraph {\n\t\"Anchor#0\" -> \"A\"[arrowhead=\"diamond\",color=\"#3D9970\",fontcolor=\"#3D9970\",label=<<FONT POINT-SIZE=\"10\">a</FONT>>];\n\t\"Anchor#0\"[label=<Anchor>];\n}"
         );
     }
 }

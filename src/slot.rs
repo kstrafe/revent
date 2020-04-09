@@ -1,9 +1,63 @@
-use crate::{assert_active_manager, Manager, Mode};
+use crate::{assert_active_manager, ChannelType, Manager, Mode};
 use std::{cell::RefCell, cmp::Ordering, fmt, rc::Rc};
 
 /// List of [Node](crate::Node)s to a signal `T`.
 ///
 /// A `slot` is a list in which one can store node handles.
+///
+/// ```
+/// use revent::{Anchor, Grapher, Manager, Node, Slot};
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// trait BasicSignal {
+///     fn basic(&mut self);
+/// }
+///
+/// struct MyAnchor {
+///     basic_slot: Slot<dyn BasicSignal>,
+///     mng: Manager,
+/// }
+/// impl MyAnchor {
+///     fn new() -> Self {
+///         let mng = Manager::new();
+///         Self {
+///             basic_slot: Slot::new("basic_slot", &mng),
+///             mng,
+///         }
+///     }
+/// }
+/// impl Anchor for MyAnchor {
+///     fn manager(&self) -> &Manager {
+///         &self.mng
+///     }
+/// }
+///
+/// // ---
+///
+/// struct MyNode;
+/// impl Node<MyAnchor, ()> for MyNode {
+///     fn register_emits(_: &MyAnchor) -> () { () }
+///
+///     fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
+///         hub.basic_slot.register(item);
+///     }
+///     const NAME: &'static str = "MyNode";
+/// }
+/// impl BasicSignal for MyNode {
+///     fn basic(&mut self) {
+///         println!("Hello from MyNode::basic");
+///     }
+/// }
+///
+/// // ---
+///
+/// let mut hub = MyAnchor::new();
+/// let item = hub.subscribe(|_| MyNode);
+/// hub.basic_slot.emit(|x| x.basic());
+/// hub.unsubscribe(&item);
+///
+/// Grapher::new(hub.manager()).graph_to_file("target/slot-example.png").unwrap();
+/// ```
 pub struct Slot<T: ?Sized> {
     manager: Manager,
     name: &'static str,
@@ -18,7 +72,7 @@ impl<T: ?Sized> Slot<T> {
     ///
     /// `name` is used for error reporting and graph generation in [Manager].
     pub fn new(name: &'static str, manager: &Manager) -> Self {
-        manager.ensure_new(name);
+        manager.ensure_new(name, ChannelType::Direct);
         Self {
             manager: manager.clone(),
             name,

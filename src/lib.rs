@@ -2,91 +2,52 @@
 //!
 //! # What is an event system? #
 //!
-//! An event system is a set of objects that can exchange messages with each other. In revent each
-//! object indicates which `channel`s it wants to emit and listen to. Based off this information
-//! revent generates a directed acyclic graph (DAG). Revent will panic if a cycle is detected.
+//! An event system is a set of objects that can exchange messages with each other. The objects
+//! know nothing about each other, they just know their common contracts. This allows for code to
+//! be separated along logical boundaries, thus reducing complexity and increasing testability.
 //!
-//! Revent's events are synchronous, meaning that emitting an event will immediately process all
+//! In revent each such object is called a [Node](crate::Node), as it represents a node in a graph.
+//! Each node decides for itself which `channel`s it wants to listen to, as well as emit to. Using
+//! this information we can construct a complete graph of node-to-node interactions. As we'll see,
+//! this graph is a proper directed acyclic graph (DAG), and is important for Rust's mutable aliasing
+//! rules.
+//!
+//! Revent's events are synchronous, meaning that `emitting` an event will immediately process all
 //! handlers of that event. Once the function call returns, it is guaranteed that all listeners have
 //! been called.
 //!
-//! # Basic Example #
+//! ## Extra ##
 //!
-//! ```
-//! use revent::{Anchor, Grapher, Manager, Node, Slot};
-//! use std::{cell::RefCell, rc::Rc};
-//!
-//! trait BasicSignal {}
-//!
-//! struct MyAnchor {
-//!     basic_slot: Slot<dyn BasicSignal>,
-//!     mng: Manager,
-//! }
-//! impl MyAnchor {
-//!     fn new() -> Self {
-//!         let mng = Manager::new();
-//!         Self {
-//!             basic_slot: Slot::new("basic_slot", &mng),
-//!             mng,
-//!         }
-//!     }
-//! }
-//! impl Anchor for MyAnchor {
-//!     fn manager(&self) -> &Manager {
-//!         &self.mng
-//!     }
-//! }
-//!
-//! // ---
-//!
-//! struct MyNode;
-//! impl Node<MyAnchor, ()> for MyNode {
-//!     fn register_emits(_: &MyAnchor) -> () { () }
-//!
-//!     fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-//!         hub.basic_slot.register(item);
-//!     }
-//!     const NAME: &'static str = "MyNode";
-//! }
-//! impl BasicSignal for MyNode {}
-//!
-//! // ---
-//!
-//! let mut hub = MyAnchor::new();
-//! let item = hub.subscribe(|_| MyNode);
-//! hub.basic_slot.emit(|x| {
-//!     println!("Called for each subscriber");
-//! });
-//! hub.unsubscribe(&item);
-//!
-//! Grapher::new(hub.manager()).graph_to_file("target/documentation-example.png").unwrap();
-//! ```
+//! As a visual aid, the documentation tests contain a [Grapher](crate::Grapher). To acquire the
+//! images you'll need to run these code snippets and have `graphviz` installed.
 //!
 //! ## Mutable cycles ##
 //!
 //! Revent performs cycle detection in [subscribe](crate::Anchor::subscribe) and ensures that no
-//! system exists in which we can create double mutable borrows.
+//! system exists in which we can create double mutable borrows. After subscription, no cycle
+//! detection is performed, so the actual emitting and receiving part has the lowest possible
+//! overhead.
 //!
 //! # Core Concepts #
 //!
-//! An event system based on revent has 3 core concepts:
+//! A revent system has 3 core concepts:
 //!
-//! * Slots
+//! * Channels
 //! * Anchors
 //! * Nodes
 //!
-//! ## Slots ##
+//! ## Channel ##
 //!
-//! A slot is a container for item(s) that listen to that particular slot. Any signal emission on
-//! said slot will notify all items in that slot.
+//! A channel is a container for item(s) that listen to that particular channel. Any signal emission on
+//! said channel will notify all items in that channel.
 //!
-//! In this documentation `slot` denotes both [Slot] and [Single].
+//! In this documentation `channel` denotes [Slot], [Single], as well as [feed].
 //!
 //! ## Anchor ##
 //!
-//! An anchor contains all slots in a system. It also contains a [Manager] and
+//! An anchor contains all channels in a system. It also contains a [Manager] and
 //! implements [Anchor]. We register new [Node]s to an anchor, and these nodes will themselves
-//! choose which slots to listen or emit to. Only anchors can be subscribed to.
+//! choose which channels to listen or emit to. Only anchors can be subscribed to.
 //!
 //! ## Nodes ##
 //!
@@ -95,13 +56,13 @@
 //! * [register_emits](crate::Node::register_emits)
 //! * [register_listens](crate::Node::register_listens)
 //!
-//! These specify the signals to emit and listen to. Any struct can be a node. Nodes are
+//! These specify the channels to emit and listen to. Any struct can be a node. Nodes are
 //! constructed by first constructing the emitter structure as specified by `register_emits`. This
 //! structure is then provided to the [Anchor::subscribe] `create` function.
 //!
-//! When talking about the nodes subscribed (as per `register_listens`) to a slot, the term `subscriber` may be used.
+//! When talking about the nodes subscribed (as per `register_listens`) to a channel, the term `subscriber` may be used.
 //!
-//! # Example with Emitter #
+//! # Example #
 //!
 //! ```
 //! use revent::{Anchor, Grapher, Manager, Node, Slot};
@@ -180,6 +141,7 @@
 //!
 //! Grapher::new(hub.manager()).graph_to_file("target/example-with-emitter.png").unwrap();
 //! ```
+//!
 #![deny(
     missing_docs,
     trivial_casts,
@@ -189,15 +151,14 @@
     unused_qualifications
 )]
 
+pub mod feed;
 mod mng;
-mod queue;
 mod single;
 mod slot;
 mod traits;
-pub(crate) use self::mng::Mode;
+pub(crate) use self::mng::{ChannelType, Mode};
 pub use self::{
     mng::{Grapher, Manager},
-    queue::{Receiver, Sender},
     single::Single,
     slot::Slot,
     traits::{Anchor, Node},
@@ -227,7 +188,10 @@ fn assert_active_manager(manager: &Manager) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Anchor, Manager, Node, Receiver, Single, Slot};
+    use crate::{
+        feed::{Feed, Feedee},
+        Anchor, Manager, Node, Single, Slot,
+    };
     use std::{cell::RefCell, rc::Rc};
 
     #[quickcheck_macros::quickcheck]
@@ -741,14 +705,14 @@ mod tests {
     #[test]
     fn using_queues() {
         struct MyAnchor {
-            queue: Receiver<usize>,
+            queue: Feed<usize>,
             mng: Manager,
         }
         impl MyAnchor {
             fn new() -> Self {
                 let mng = Manager::new();
                 Self {
-                    queue: Receiver::new("queue", &mng),
+                    queue: Feed::new("queue", &mng),
                     mng,
                 }
             }
@@ -761,22 +725,41 @@ mod tests {
 
         // ---
 
-        struct Listener;
-        impl Node<MyAnchor, ()> for Listener {
+        struct FeederNode;
+        impl Node<MyAnchor, ()> for FeederNode {
             fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.sender().push(0);
+                anchor.queue.feeder().feed(0);
             }
             fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "Listener";
+            const NAME: &'static str = "FeederNode";
+        }
+
+        // ---
+
+        struct FeedeeNode {
+            queue: Feedee<usize>,
+        }
+        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
+            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
+                anchor.queue.feedee()
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "FeedeeNode";
+        }
+
+        impl FeedeeNode {
+            fn pop(&mut self) -> Option<usize> {
+                self.queue.pop()
+            }
         }
 
         // ---
 
         let mut hub = MyAnchor::new();
-        hub.subscribe(|_| Listener);
+        let feedee = hub.subscribe(|queue| FeedeeNode { queue });
+        hub.subscribe(|_| FeederNode);
 
-        let msgs = hub.queue.exchange(Vec::new());
-        assert_eq!(&[0], &msgs[..]);
+        assert_eq!(Some(0), feedee.borrow_mut().pop());
     }
 
     #[test]
@@ -784,7 +767,46 @@ mod tests {
     fn double_receiver() {
         let mng = Manager::new();
 
-        Receiver::<()>::new("lorem", &mng);
+        Feed::<()>::new("lorem", &mng);
         Slot::<()>::new("lorem", &mng);
+    }
+
+    #[test]
+    fn recur_via_feed() {
+        struct MyAnchor {
+            feed: Feed<()>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self {
+                    feed: Feed::new("queue", &mng),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct MyNode;
+        impl Node<MyAnchor, ()> for MyNode {
+            fn register_emits(anchor: &MyAnchor) {
+                let _ = anchor.feed.feeder();
+                let _ = anchor.feed.feedee();
+            }
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "MyNode";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        hub.subscribe(|_| MyNode);
     }
 }

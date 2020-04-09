@@ -1,20 +1,21 @@
 use crate::{Manager, Mode};
 use std::{cell::RefCell, rc::Rc};
 
-/// A collection of slots to which [Node]s can subscribe.
+/// A collection of channels to which [Node]s can [subscribe](Anchor::subscribe).
 ///
 /// Anchors must be organized by a [Manager], this is done by implementing a data structure
-/// containing various slots together with this trait.
+/// containing various channels together with this trait.
 ///
 /// A typical implementation may look like this:
 /// ```
-/// use revent::{Anchor, Manager, Slot};
+/// use revent::{Anchor, feed::Feed, Manager, Single, Slot};
 /// use std::{cell::RefCell, rc::Rc};
 ///
 /// struct MyAnchor {
 ///     a: Slot<()>,
-///     b: Slot<()>,
-///     // more slots...
+///     b: Single<()>,
+///     c: Feed<()>,
+///     // more channels...
 ///     manager: Manager,
 /// }
 ///
