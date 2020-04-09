@@ -144,7 +144,7 @@ impl<T: Clone> Feeder<T> {
                 let (mut queue, name) = (queue.items.borrow_mut(), queue.name);
                 if queue.len() == self.max_size {
                     panic!(
-                        "revent: feedee queue exceeds maximum size: {}, feedee: {}",
+                        "revent: feedee queue exceeds maximum size: {}, feedee: {:?}",
                         self.max_size, name,
                     );
                 }
@@ -154,7 +154,7 @@ impl<T: Clone> Feeder<T> {
             let (mut queue, name) = (last.items.borrow_mut(), last.name);
             if queue.len() == self.max_size {
                 panic!(
-                    "revent: feedee queue exceeds maximum size: {}, feedee: {}",
+                    "revent: feedee queue exceeds maximum size: {}, feedee: {:?}",
                     self.max_size, name,
                 );
             }
