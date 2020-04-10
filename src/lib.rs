@@ -1214,5 +1214,14 @@ mod tests {
 
         assert_eq!(Some(6), fe1.pop());
         assert_eq!(Some(6), fe2.pop());
+
+        drop(fe2);
+        drop(feedee_2);
+        assert_eq!(None, fe1.pop());
+
+        for idx in 7..30 {
+            fr.send();
+            assert_eq!(Some(idx), fe1.pop());
+        }
     }
 }
