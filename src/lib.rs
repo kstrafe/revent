@@ -1101,13 +1101,22 @@ mod tests {
 
         // ---
 
-        struct FeederNode;
-        impl Node<MyAnchor, ()> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.feeder().feed(0);
+        struct FeederNode {
+            count: usize,
+            queue: Feeder<usize>,
+        }
+        impl Node<MyAnchor, Feeder<usize>> for FeederNode {
+            fn register_emits(anchor: &MyAnchor) -> Feeder<usize> {
+                anchor.queue.feeder()
             }
             fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
             const NAME: &'static str = "FeederNode";
+        }
+        impl FeederNode {
+            fn send(&mut self) {
+                self.queue.feed(self.count);
+                self.count += 1;
+            }
         }
 
         // ---
@@ -1126,24 +1135,84 @@ mod tests {
         impl FeedeeNode {
             fn new(mut queue: Feedee<usize>, enable: bool) -> Self {
                 if !enable {
-                    queue.disable();
+                    assert!(queue.disable());
                 }
                 Self { queue }
             }
             fn pop(&mut self) -> Option<usize> {
                 self.queue.pop()
             }
+            fn enable(&mut self) -> bool {
+                self.queue.enable()
+            }
+            fn disable(&mut self) -> bool {
+                self.queue.disable()
+            }
         }
 
         // ---
 
         let mut hub = MyAnchor::new();
-        let sub_1 = hub.subscribe(|queue| FeedeeNode::new(queue, true));
-        let sub_2 = hub.subscribe(|queue| FeedeeNode::new(queue, false));
 
-        hub.subscribe(|_| FeederNode);
+        let feedee_1 = hub.subscribe(|queue| FeedeeNode::new(queue, true));
+        let feedee_2 = hub.subscribe(|queue| FeedeeNode::new(queue, false));
+        let feeder = hub.subscribe(|queue| FeederNode { count: 0, queue });
 
-        assert_eq!(Some(0), sub_1.borrow_mut().pop());
-        assert_eq!(None, sub_2.borrow_mut().pop());
+        let mut fe1 = feedee_1.borrow_mut();
+        let mut fe2 = feedee_2.borrow_mut();
+        let mut fr = feeder.borrow_mut();
+
+        fr.send();
+
+        assert_eq!(Some(0), fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        assert_eq!(None, fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        fr.send();
+        fr.send();
+
+        assert_eq!(Some(1), fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        assert_eq!(Some(2), fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        assert!(fe2.enable());
+
+        fr.send();
+
+        assert_eq!(Some(3), fe1.pop());
+        assert_eq!(Some(3), fe2.pop());
+
+        assert!(!fe2.enable());
+        assert!(fe1.disable());
+
+        assert_eq!(None, fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        fr.send();
+
+        assert_eq!(None, fe1.pop());
+        assert_eq!(Some(4), fe2.pop());
+
+        assert!(fe2.disable());
+
+        fr.send();
+
+        assert_eq!(None, fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        assert!(fe1.enable());
+        assert!(fe2.enable());
+
+        assert_eq!(None, fe1.pop());
+        assert_eq!(None, fe2.pop());
+
+        fr.send();
+
+        assert_eq!(Some(6), fe1.pop());
+        assert_eq!(Some(6), fe2.pop());
     }
 }
