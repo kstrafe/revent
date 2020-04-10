@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "revent: feedee queue exceeds maximum size: 1, feedee: \"FeedeeNode\""
+        expected = "revent: feedee queue exceeds maximum size: 1, channel: \"queue\", feedee: \"FeedeeNode\""
     )]
     fn feeder_channel_limit_single() {
         struct MyAnchor {
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "revent: feedee queue exceeds maximum size: 1, feedee: \"FeedeeNode\""
+        expected = "revent: feedee queue exceeds maximum size: 1, channel: \"queue\", feedee: \"FeedeeNode\""
     )]
     fn feeder_channel_limit() {
         struct MyAnchor {

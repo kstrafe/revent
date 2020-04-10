@@ -109,15 +109,17 @@ use crate::{assert_active_manager, ChannelType, Manager};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 struct Queue<T> {
+    channel_name: &'static str,
+    feedee_name: &'static str,
     items: Rc<RefCell<VecDeque<T>>>,
-    name: &'static str,
 }
 
 impl<T> Clone for Queue<T> {
     fn clone(&self) -> Self {
         Self {
+            channel_name: self.channel_name,
+            feedee_name: self.feedee_name,
             items: self.items.clone(),
-            name: self.name,
         }
     }
 }
@@ -141,24 +143,24 @@ impl<T: Clone> Feeder<T> {
         let mut queues = self.queues.borrow_mut();
         if let Some((last, rest)) = queues.split_last_mut() {
             for queue in rest.iter_mut() {
-                let (mut queue, name) = (queue.items.borrow_mut(), queue.name);
-                if queue.len() == self.max_size {
+                let mut items = queue.items.borrow_mut();
+                if items.len() == self.max_size {
                     panic!(
-                        "revent: feedee queue exceeds maximum size: {}, feedee: {:?}",
-                        self.max_size, name,
+                        "revent: feedee queue exceeds maximum size: {}, channel: {:?}, feedee: {:?}",
+                        self.max_size, queue.channel_name, queue.feedee_name,
                     );
                 }
-                queue.push_back(item.clone());
+                items.push_back(item.clone());
             }
 
-            let (mut queue, name) = (last.items.borrow_mut(), last.name);
-            if queue.len() == self.max_size {
+            let mut items = last.items.borrow_mut();
+            if items.len() == self.max_size {
                 panic!(
-                    "revent: feedee queue exceeds maximum size: {}, feedee: {:?}",
-                    self.max_size, name,
+                    "revent: feedee queue exceeds maximum size: {}, channel: {:?}, feedee: {:?}",
+                    self.max_size, last.channel_name, last.feedee_name,
                 );
             }
-            queue.push_back(item);
+            items.push_back(item);
         }
     }
 }
@@ -224,20 +226,20 @@ impl<T> Drop for Feedee<T> {
 
 /// Feedback mechanism to provide data to [Node](crate::Node)s higher up in the revent DAG.
 pub struct Feed<T> {
+    channel_name: &'static str,
     manager: Manager,
     max_size: usize,
-    name: &'static str,
     queues: Rc<RefCell<Vec<Queue<T>>>>,
 }
 
 impl<T: Clone> Feed<T> {
     /// Create a new feed.
-    pub fn new(name: &'static str, manager: &Manager, max_size: usize) -> Self {
-        manager.ensure_new(name, ChannelType::Feed);
+    pub fn new(channel_name: &'static str, manager: &Manager, max_size: usize) -> Self {
+        manager.ensure_new(channel_name, ChannelType::Feed);
         Self {
+            channel_name,
             manager: manager.clone(),
             max_size,
-            name,
             queues: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -245,7 +247,7 @@ impl<T: Clone> Feed<T> {
     /// Create a feed sender.
     pub fn feeder(&self) -> Feeder<T> {
         assert_active_manager(&self.manager);
-        self.manager.register_emit(self.name);
+        self.manager.register_emit(self.channel_name);
         Feeder {
             max_size: self.max_size,
             queues: self.queues.clone(),
@@ -259,10 +261,11 @@ impl<T: Clone> Feed<T> {
     /// other.
     pub fn feedee(&self) -> Feedee<T> {
         assert_active_manager(&self.manager);
-        self.manager.register_listen(self.name);
+        self.manager.register_listen(self.channel_name);
         let queue = Queue {
+            channel_name: self.channel_name,
+            feedee_name: self.manager.current(),
             items: Rc::new(RefCell::new(VecDeque::new())),
-            name: self.manager.current(),
         };
         self.queues.borrow_mut().push(queue.clone());
         Feedee {
