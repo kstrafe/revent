@@ -181,9 +181,6 @@ impl<T> Feedee<T> {
     ///
     /// Feedees are enabled by default.
     ///
-    /// This function is idempotent, meaning that calling it multiple times has no effect if
-    /// the feedee is already enabled.
-    ///
     /// # Returns #
     ///
     /// True if the state changed from disabled to enabled. False otherwise.
@@ -199,9 +196,6 @@ impl<T> Feedee<T> {
     }
 
     /// Disable this receiver. The [Feeder] will not be able to push data to this queue.
-    ///
-    /// This function is idempotent, meaning that calling it multiple times has no effect if
-    /// the feedee is already disabled.
     ///
     /// # Returns #
     ///
