@@ -31,9 +31,9 @@ impl<T: ?Sized> Single<T> {
     /// Emit a signal on this signal single.
     ///
     /// Panics if no node is subscribed to this single.
-    pub fn emit<F, R>(&mut self, mut caller: F) -> R
+    pub fn emit<F, R>(&mut self, caller: F) -> R
     where
-        F: FnMut(&mut T) -> R,
+        F: FnOnce(&mut T) -> R,
     {
         #[cfg(feature = "logging")]
         self.manager.log_emit(self.name);
