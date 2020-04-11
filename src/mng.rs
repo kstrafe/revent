@@ -1,3 +1,7 @@
+#[cfg(feature = "logging")]
+use slog::{o, trace, Discard, Logger};
+#[cfg(feature = "logging")]
+use std::collections::HashMap;
 use std::{
     cell::{Ref, RefCell},
     collections::{BTreeMap, BTreeSet},
@@ -63,6 +67,13 @@ pub(crate) struct ManagerInternal {
     listens: BTreeMap<ChannelName, BTreeSet<HandlerName>>,
 
     channel_types: BTreeMap<ChannelName, ChannelType>,
+
+    #[cfg(feature = "logging")]
+    names: HashMap<*const (), HandlerName>,
+    #[cfg(feature = "logging")]
+    logger: Logger,
+    #[cfg(feature = "logging")]
+    emit_level: usize,
 }
 
 impl ManagerInternal {
@@ -121,6 +132,99 @@ impl Manager {
     /// Create a new manager.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new manager with a logger.
+    #[cfg(feature = "logging")]
+    pub fn with_logger(logger: Logger) -> Self {
+        Self(Rc::new(RefCell::new(ManagerInternal {
+            active: Default::default(),
+            amalgam: Default::default(),
+
+            emits: Default::default(),
+            listens: Default::default(),
+
+            channel_types: Default::default(),
+
+            names: Default::default(),
+            logger,
+            emit_level: 0,
+        })))
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_emit(&self, name: ChannelName) {
+        let mut this = self.0.borrow_mut();
+        if this.emit_level == 0 {
+            trace!(this.logger, "Root emit"; "channel" => name);
+        }
+        this.emit_level += 1;
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_feedee(&self, name: ChannelName) {
+        let this = self.0.borrow_mut();
+        trace!(
+            this.logger,
+            "{}<- {}",
+            "\t".repeat(this.emit_level + 1),
+            name
+        );
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_feeder(&self, name: ChannelName) {
+        let this = self.0.borrow_mut();
+        trace!(
+            this.logger,
+            "{}-> {}",
+            "\t".repeat(this.emit_level + 1),
+            name
+        );
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_feeder_push(&self, recipient: HandlerName) {
+        let this = self.0.borrow_mut();
+        trace!(
+            this.logger,
+            "{}{}",
+            "\t".repeat(this.emit_level + 2),
+            recipient
+        );
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_emit_on_item<T: ?Sized>(&self, item: Rc<RefCell<T>>, channel: ChannelName) {
+        let this = self.0.borrow();
+        let ptr = Rc::into_raw(item) as *const ();
+        unsafe {
+            Rc::from_raw(ptr);
+        }
+        let handler_name = this.names.get(&ptr).unwrap();
+        trace!(
+            this.logger,
+            "{}{} ({})",
+            "\t".repeat(this.emit_level),
+            handler_name,
+            channel
+        );
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_register<T: ?Sized>(&self, name: HandlerName, item: Rc<RefCell<T>>) {
+        let mut this = self.0.borrow_mut();
+        let ptr = Rc::into_raw(item) as *const ();
+        unsafe {
+            Rc::from_raw(ptr);
+        }
+        assert!(matches!(this.names.insert(ptr, name), None));
+    }
+
+    #[cfg(feature = "logging")]
+    pub(crate) fn log_emit_end(&self) {
+        let mut this = self.0.borrow_mut();
+        this.emit_level -= 1;
     }
 
     pub(crate) fn current(&self) -> HandlerName {
@@ -216,6 +320,13 @@ impl Default for Manager {
             listens: Default::default(),
 
             channel_types: Default::default(),
+
+            #[cfg(feature = "logging")]
+            names: Default::default(),
+            #[cfg(feature = "logging")]
+            logger: Logger::root(Discard, o!()),
+            #[cfg(feature = "logging")]
+            emit_level: 0,
         })))
     }
 }

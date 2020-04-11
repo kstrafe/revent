@@ -126,6 +126,10 @@ impl<T> Clone for Queue<T> {
 
 /// Sender part of [Feed].
 pub struct Feeder<T: Clone> {
+    #[cfg(feature = "logging")]
+    channel_name: &'static str,
+    #[cfg(feature = "logging")]
+    manager: Manager,
     max_size: usize,
     queues: Rc<RefCell<Vec<Queue<T>>>>,
 }
@@ -140,10 +144,14 @@ impl<T: Clone> Feeder<T> {
     ///
     /// Panics if the queue for a [Feedee] is full.
     pub fn feed(&self, item: T) {
+        #[cfg(feature = "logging")]
+        self.manager.log_feeder(self.channel_name);
         let mut queues = self.queues.borrow_mut();
         if let Some((last, rest)) = queues.split_last_mut() {
             for queue in rest.iter_mut() {
                 let mut items = queue.items.borrow_mut();
+                #[cfg(feature = "logging")]
+                self.manager.log_feeder_push(queue.feedee_name);
                 if items.len() == self.max_size {
                     panic!(
                         "revent: feedee queue exceeds maximum size: {}, channel: {:?}, feedee: {:?}",
@@ -154,6 +162,8 @@ impl<T: Clone> Feeder<T> {
             }
 
             let mut items = last.items.borrow_mut();
+            #[cfg(feature = "logging")]
+            self.manager.log_feeder_push(last.feedee_name);
             if items.len() == self.max_size {
                 panic!(
                     "revent: feedee queue exceeds maximum size: {}, channel: {:?}, feedee: {:?}",
@@ -167,6 +177,8 @@ impl<T: Clone> Feeder<T> {
 
 /// Receiver part of [Feed].
 pub struct Feedee<T> {
+    #[cfg(feature = "logging")]
+    manager: Manager,
     queues: Rc<RefCell<Vec<Queue<T>>>>,
     queue: Queue<T>,
 }
@@ -174,6 +186,8 @@ pub struct Feedee<T> {
 impl<T> Feedee<T> {
     /// Get an item from the front of the queue.
     pub fn pop(&mut self) -> Option<T> {
+        #[cfg(feature = "logging")]
+        self.manager.log_feedee(self.queue.channel_name);
         self.queue.items.borrow_mut().pop_front()
     }
 
@@ -243,6 +257,10 @@ impl<T: Clone> Feed<T> {
         assert_active_manager(&self.manager);
         self.manager.register_emit(self.channel_name);
         Feeder {
+            #[cfg(feature = "logging")]
+            channel_name: self.channel_name,
+            #[cfg(feature = "logging")]
+            manager: self.manager.clone(),
             max_size: self.max_size,
             queues: self.queues.clone(),
         }
@@ -263,6 +281,8 @@ impl<T: Clone> Feed<T> {
         };
         self.queues.borrow_mut().push(queue.clone());
         Feedee {
+            #[cfg(feature = "logging")]
+            manager: self.manager.clone(),
             queues: self.queues.clone(),
             queue,
         }

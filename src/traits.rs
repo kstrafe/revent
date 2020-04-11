@@ -52,6 +52,9 @@ where
         let item = Rc::new(RefCell::new(create(register_emits)));
         T::register_listens(self, item.clone());
 
+        #[cfg(feature = "logging")]
+        manager.log_register(T::NAME, item.clone());
+
         manager.finish_construction();
         crate::STACK.with(|x| {
             x.borrow_mut().pop();

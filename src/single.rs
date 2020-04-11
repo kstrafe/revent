@@ -35,9 +35,19 @@ impl<T: ?Sized> Single<T> {
     where
         F: FnMut(&mut T) -> R,
     {
+        #[cfg(feature = "logging")]
+        self.manager.log_emit(self.name);
         let mut item = self.node.borrow_mut();
 
         if let Some(item) = &mut *item {
+            #[cfg(feature = "logging")]
+            {
+                self.manager.log_emit_on_item(item.clone(), self.name);
+                let result = caller(&mut item.borrow_mut());
+                self.manager.log_emit_end();
+                result
+            }
+            #[cfg(not(feature = "logging"))]
             caller(&mut item.borrow_mut())
         } else {
             panic!("revent: no node in {:?}", self.name)

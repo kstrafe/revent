@@ -85,23 +85,16 @@ impl<T: ?Sized> Slot<T> {
     where
         F: FnMut(&mut T),
     {
+        #[cfg(feature = "logging")]
+        self.manager.log_emit(self.name);
         for item in self.nodes.borrow_mut().iter_mut() {
+            #[cfg(feature = "logging")]
+            self.manager.log_emit_on_item(item.clone(), self.name);
             let mut item = item.borrow_mut();
             caller(&mut *item);
         }
-    }
-
-    /// Continue emitting only if the caller returns `true`. Stops if `false`.
-    pub fn emit_short<F>(&mut self, mut caller: F)
-    where
-        F: FnMut(&mut T) -> bool,
-    {
-        for item in self.nodes.borrow_mut().iter_mut() {
-            let mut item = item.borrow_mut();
-            if !caller(&mut *item) {
-                break;
-            }
-        }
+        #[cfg(feature = "logging")]
+        self.manager.log_emit_end();
     }
 
     /// Sort the nodes to this slot.

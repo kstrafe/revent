@@ -62,6 +62,31 @@
 //!
 //! When talking about the nodes subscribed (as per `register_listens`) to a channel, the term `subscriber` may be used.
 //!
+//! # Logging #
+//!
+//! Revent comes with a builtin logging aid using `slog`. Enable the `logging` feature and use
+//! `Manager::with_logger`. The resulting logging will occur when:
+//!
+//! * A feeder is fed data (represented by `-> [feed-channel-name]`)
+//! * A feedee pops data (represented by `<- [feed-channel-name]`)
+//! * A slot/single emits
+//!
+//! The format is a nested structure represented in text in an easy-to-read format:
+//!
+//! ```ignore
+//! Root emit, channel=[channel-name]
+//!     [handler-name] ([channel-name])
+//!     [handler-name] ([channel-name])
+//!         [handler-name] ([channel-name])
+//!         [handler-name] ([channel-name])
+//!             -> [feed-channel-name]
+//!             [handler-name] ([channel-name])
+//!         [handler-name] ([channel-name])
+//!     [handler-name] ([channel-name])
+//!         <- [feed-channel-name]
+//! ```
+//!
+//!
 //! # Example #
 //!
 //! ```
@@ -146,7 +171,6 @@
     missing_docs,
     trivial_casts,
     trivial_numeric_casts,
-    unsafe_code,
     unused_import_braces,
     unused_qualifications
 )]
@@ -1223,5 +1247,72 @@ mod tests {
             fr.send();
             assert_eq!(Some(idx), fe1.pop());
         }
+    }
+}
+
+#[cfg(feature = "logging")]
+#[cfg(test)]
+mod logging_tests {
+    use crate::{
+        feed::{Feed, Feedee, Feeder},
+        Anchor, Manager, Node, Single, Slot,
+    };
+    use slog::{o, Drain, Logger};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn testing_logger_functionality() {
+        struct MyAnchor {
+            slot: Slot<Listener>,
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let decorator = slog_term::TermDecorator::new().build();
+                let drain = slog_term::FullFormat::new(decorator).build().fuse();
+                let drain = slog_async::Async::new(drain).build().fuse();
+                let mng = Manager::with_logger(Logger::root(drain, o!()));
+                Self {
+                    slot: Slot::new("slot", &mng),
+                    mng,
+                }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct Listener {
+            count: usize,
+        }
+        impl Node<MyAnchor, ()> for Listener {
+            fn register_emits(_: &MyAnchor) -> () {
+                ()
+            }
+            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
+                let count = item.borrow().count;
+                if count != 0 {
+                    hub.subscribe(|_| Listener { count: count - 1 });
+                }
+                hub.slot.register(item);
+            }
+            const NAME: &'static str = "Listener";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        hub.subscribe(|_| Listener { count: 100 });
+
+        let mut count = 0;
+        hub.slot.emit(|x| {
+            assert_eq!(count, x.count);
+            count += 1;
+        });
+        assert_eq!(101, count);
     }
 }
