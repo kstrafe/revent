@@ -4,12 +4,27 @@ use revent::Anchor;
 mod setup {
     use revent::{
         feed::{Feed, Feedee, Feeder},
-        Anchor, Manager, Node, Slot,
+        Anchor, Manager, Node,
     };
     use std::{cell::RefCell, rc::Rc};
 
+    #[derive(Clone)]
+    pub enum Message {
+        Vector(Vec<u8>),
+        Nothing,
+    }
+
+    impl Message {
+        pub fn get_vector(&self) -> &Vec<u8> {
+            match self {
+                Message::Vector(vec) => vec,
+                _ => panic!(),
+            }
+        }
+    }
+
     pub struct MyAnchor {
-        pub feed: Feed<Vec<u8>>,
+        pub feed: Feed<Message>,
         pub manager: Manager,
     }
 
@@ -23,7 +38,7 @@ mod setup {
         pub fn new() -> Self {
             let manager = Manager::new();
             Self {
-                feed: Feed::new("feed", &manager),
+                feed: Feed::new("feed", &manager, 1),
                 manager,
             }
         }
@@ -32,7 +47,7 @@ mod setup {
     // ---
 
     pub struct FeedeeEmitter {
-        pub feed: Feedee<Vec<u8>>,
+        pub feed: Feedee<Message>,
     }
 
     pub struct FeedeeHandler {
@@ -53,7 +68,7 @@ mod setup {
     // ---
 
     pub struct FeederEmitter {
-        pub feed: Feeder<Vec<u8>>,
+        pub feed: Feeder<Message>,
     }
 
     pub struct FeederHandler {
@@ -73,9 +88,9 @@ mod setup {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("many feedees", |b| {
+    c.bench_function("cloning big data to feedees", |b| {
         let mut hub = setup::MyAnchor::new();
-        let mut items = (0..3)
+        let items = (0..3)
             .map(|_| hub.subscribe(|emits| setup::FeedeeHandler { emits }))
             .collect::<Vec<_>>();
         let feeder = hub.subscribe(|emits| setup::FeederHandler { emits });
@@ -84,12 +99,18 @@ fn criterion_benchmark(c: &mut Criterion) {
                 .borrow_mut()
                 .emits
                 .feed
-                .feed(black_box(vec![0; 8294400]));
+                .feed(black_box(setup::Message::Vector(vec![0; 8294400])));
 
             for item in items.iter() {
                 assert_eq!(
                     8294400,
-                    item.borrow_mut().emits.feed.pop().unwrap().capacity()
+                    item.borrow_mut()
+                        .emits
+                        .feed
+                        .pop()
+                        .unwrap()
+                        .get_vector()
+                        .capacity()
                 );
             }
         });
@@ -97,7 +118,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("small feedees", |b| {
         let mut hub = setup::MyAnchor::new();
-        let mut items = (0..10_000)
+        let items = (0..10_000)
             .map(|_| hub.subscribe(|emits| setup::FeedeeHandler { emits }))
             .collect::<Vec<_>>();
         let feeder = hub.subscribe(|emits| setup::FeederHandler { emits });
@@ -106,10 +127,13 @@ fn criterion_benchmark(c: &mut Criterion) {
                 .borrow_mut()
                 .emits
                 .feed
-                .feed(black_box(vec![0; 1024]));
+                .feed(black_box(setup::Message::Nothing));
 
             for item in items.iter() {
-                assert_eq!(1024, item.borrow_mut().emits.feed.pop().unwrap().capacity());
+                assert!(matches!(
+                    item.borrow_mut().emits.feed.pop().unwrap(),
+                    setup::Message::Nothing
+                ));
             }
         });
     });
