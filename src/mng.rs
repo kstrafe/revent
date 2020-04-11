@@ -222,6 +222,16 @@ impl Manager {
     }
 
     #[cfg(feature = "logging")]
+    pub(crate) fn log_deregister<T: ?Sized>(&self, name: HandlerName, item: Rc<RefCell<T>>) {
+        let mut this = self.0.borrow_mut();
+        let ptr = Rc::into_raw(item) as *const ();
+        unsafe {
+            Rc::from_raw(ptr);
+        }
+        assert_eq!(this.names.remove(&ptr).unwrap(), name);
+    }
+
+    #[cfg(feature = "logging")]
     pub(crate) fn log_emit_end(&self) {
         let mut this = self.0.borrow_mut();
         this.emit_level -= 1;

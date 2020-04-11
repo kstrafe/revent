@@ -76,6 +76,9 @@ where
 
         T::register_listens(self, input.clone());
 
+        #[cfg(feature = "logging")]
+        self.manager().log_deregister(T::NAME, input.clone());
+
         crate::STACK.with(|x| {
             x.borrow_mut().pop();
         });

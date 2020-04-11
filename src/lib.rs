@@ -1253,10 +1253,7 @@ mod tests {
 #[cfg(feature = "logging")]
 #[cfg(test)]
 mod logging_tests {
-    use crate::{
-        feed::{Feed, Feedee, Feeder},
-        Anchor, Manager, Node, Single, Slot,
-    };
+    use crate::{Anchor, Manager, Node, Slot};
     use slog::{o, Drain, Logger};
     use std::{cell::RefCell, rc::Rc};
 
@@ -1314,5 +1311,40 @@ mod logging_tests {
             count += 1;
         });
         assert_eq!(101, count);
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn many_subscribes_unsubscribes(value: usize) {
+        struct MyAnchor {
+            mng: Manager,
+        }
+        impl MyAnchor {
+            fn new() -> Self {
+                let mng = Manager::new();
+                Self { mng }
+            }
+        }
+        impl Anchor for MyAnchor {
+            fn manager(&self) -> &Manager {
+                &self.mng
+            }
+        }
+
+        // ---
+
+        struct Listener;
+        impl Node<MyAnchor, ()> for Listener {
+            fn register_emits(_: &MyAnchor) {}
+            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
+            const NAME: &'static str = "Listener";
+        }
+
+        // ---
+
+        let mut hub = MyAnchor::new();
+        for _ in 0..value {
+            let item = hub.subscribe(|_| Listener);
+            hub.unsubscribe(&item);
+        }
     }
 }
