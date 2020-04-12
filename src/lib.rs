@@ -1,172 +1,95 @@
-//! Synchronous event system.
+//! Synchronous, recursive event system.
 //!
-//! # What is an event system? #
+//! # Introduction #
 //!
-//! An event system is a set of objects that can exchange messages with each other. The objects
-//! know nothing about each other, they just know their common contracts. This allows for code to
-//! be separated along logical boundaries, thus reducing complexity and increasing testability.
+//! An event system is a collection of objects that can receive and send signals.
 //!
-//! In revent each such object is called a [Node](crate::Node), as it represents a node in a graph.
-//! Each node decides for itself which `channel`s it wants to listen to, as well as emit to. Using
-//! this information we can construct a complete graph of node-to-node interactions. As we'll see,
-//! this graph is a proper directed acyclic graph (DAG), and is important for Rust's mutable aliasing
-//! rules.
+//! In `revent` we construct something called a `hub` which contains [Channel]s and/or [Slot]s.
+//! Each such signal container is just a list of [Node]s (objects) interested in said signal.
 //!
-//! Revent's events are synchronous, meaning that `emitting` an event will immediately process all
-//! handlers of that event. Once the function call returns, it is guaranteed that all listeners have
-//! been called.
+//! Emitting an event is as simple as just running a function on the relevant channel.
 //!
-//! ## Extra ##
-//!
-//! As a visual aid, the documentation tests contain a [Grapher](crate::Grapher). To acquire the
-//! images you'll need to run these code snippets and have `graphviz` installed.
-//!
-//! ## Mutable cycles ##
-//!
-//! Revent performs cycle detection in [subscribe](crate::Anchor::subscribe) and ensures that no
-//! system exists in which we can create double mutable borrows. After subscription, no cycle
-//! detection is performed, so the actual emitting and receiving part has the lowest possible
-//! overhead.
-//!
-//! # Core Concepts #
-//!
-//! A revent system has 3 core concepts:
-//!
-//! * Channels
-//! * Anchors
-//! * Nodes
-//!
-//! ## Channel ##
-//!
-//! A channel is a container for item(s) that listen to that particular channel. Any signal emission on
-//! said channel will notify all items in that channel.
-//!
-//! In this documentation `channel` denotes [Slot], [Single], as well as [feed].
-//!
-//! ## Anchor ##
-//!
-//! An anchor contains all channels in a system. It also contains a [Manager] and
-//! implements [Anchor]. We register new [Node]s to an anchor, and these nodes will themselves
-//! choose which channels to listen or emit to. Only anchors can be subscribed to.
-//!
-//! ## Nodes ##
-//!
-//! A node implements [Node] which contains the functions:
-//!
-//! * [register_emits](crate::Node::register_emits)
-//! * [register_listens](crate::Node::register_listens)
-//!
-//! These specify the channels to emit and listen to. Any struct can be a node. Nodes are
-//! constructed by first constructing the emitter structure as specified by `register_emits`. This
-//! structure is then provided to the [Anchor::subscribe] `create` function.
-//!
-//! When talking about the nodes subscribed (as per `register_listens`) to a channel, the term `subscriber` may be used.
-//!
-//! # Logging #
-//!
-//! Revent comes with a builtin logging aid using `slog`. Enable the `logging` feature and use
-//! `Manager::with_logger`. The resulting logging will occur when:
-//!
-//! * A feeder is fed data (represented by `-> [feed-channel-name]`)
-//! * A feedee pops data (represented by `<- [feed-channel-name]`)
-//! * A slot/single emits
-//!
-//! The format is a nested structure represented in text in an easy-to-read format:
-//!
-//! ```ignore
-//! Root emit, channel=[channel-name]
-//!     [handler-name] ([channel-name])
-//!     [handler-name] ([channel-name])
-//!         [handler-name] ([channel-name])
-//!         [handler-name] ([channel-name])
-//!             -> [feed-channel-name]
-//!             [handler-name] ([channel-name])
-//!         [handler-name] ([channel-name])
-//!     [handler-name] ([channel-name])
-//!         <- [feed-channel-name]
-//! ```
-//!
+//! `revent`'s types ensure that we do _not_ need [RefCell](std::cell::RefCell), and that we do not
+//! accidentally mutably alias. Recursion can be achieved by suspending access to an object's `&mut
+//! Self`.
 //!
 //! # Example #
 //!
 //! ```
-//! use revent::{Anchor, Grapher, Manager, Node, Slot};
-//! use std::{cell::RefCell, rc::Rc};
+//! use revent::{Channel, Node, Slot, Suspend};
 //!
-//! // First let's crate a hub (Anchor) that contains two signals.
+//! // Create signal traits.
+//! trait SignalA { fn signal_a(&mut self, hub: &MyHub); }
+//! trait SignalB { fn signal_b(&mut self, hub: &MyHub); }
+//! trait SignalC { fn signal_c(&mut self); }
 //!
-//! trait BasicSignal {
-//!     fn basic(&mut self);
+//! // Create a struct of channels and slots based on your signal traits.
+//! #[derive(Default)]
+//! struct MyHub {
+//!     signal_a: Channel<dyn SignalA>,
+//!     signal_b: Channel<dyn SignalB>, // A channel contains any number of nodes.
+//!     signal_c: Slot<dyn SignalC>, // A slot contains only a single node.
 //! }
 //!
-//! struct MyAnchor {
-//!     basic_slot_1: Slot<dyn BasicSignal>,
-//!     basic_slot_2: Slot<dyn BasicSignal>,
-//!     mng: Manager,
-//! }
-//! impl MyAnchor {
-//!     fn new() -> Self {
-//!         let mng = Manager::new();
-//!         Self {
-//!             basic_slot_1: Slot::new("basic_slot_1", &mng),
-//!             basic_slot_2: Slot::new("basic_slot_2", &mng),
-//!             mng,
-//!         }
+//! // Create trait implementors. Note that `A` implements both `SignalA` and `SignalB`.
+//! struct A; struct B; struct C;
+//!
+//! impl SignalA for A {
+//!     fn signal_a(&mut self, hub: &MyHub) {
+//!         println!("A::signal_a: {:?}", self as *mut _);
+//!
+//!         self.suspend(|| { // Suspend here in order to not panic. `signal_b` also contains this
+//!             hub.signal_b.emit(|x| { // object, so we must ensure we relinquish access to `&mut`.
+//!                 x.signal_b(hub);
+//!             });
+//!         });
 //!     }
 //! }
-//! impl Anchor for MyAnchor {
-//!     fn manager(&self) -> &Manager {
-//!         &self.mng
+//! impl SignalB for A {
+//!     fn signal_b(&mut self, _: &MyHub) {
+//!         println!("A::signal_b: {:?}", self as *mut _);
 //!     }
 //! }
-//!
-//! // ---
-//!
-//! // Now we define our emitter structure, this one contains only `basic_slot_2`, which indicates
-//! // that we want to emit only to this slot for the subscribers using it as their register_emits.
-//!
-//! struct MyEmitter {
-//!     basic_slot_2: Slot<dyn BasicSignal>,
-//! }
-//!
-//! // ---
-//!
-//! // Create a node that uses MyEmitter (emits on `basic_slot_2`), and listens on
-//! // `basic_slot_1`.
-//!
-//! struct MyNode { emits: MyEmitter }
-//! impl Node<MyAnchor, MyEmitter> for MyNode {
-//!     // Indicate which slots we want to use.
-//!     fn register_emits(hub: &MyAnchor) -> MyEmitter {
-//!         MyEmitter {
-//!             basic_slot_2: hub.basic_slot_2.clone(),
-//!         }
+//! impl SignalB for B {
+//!     fn signal_b(&mut self, hub: &MyHub) {
+//!         println!("B::signal_b: {:?}", self as *mut _);
+//!         hub.signal_c.emit(|x| { // We can also emit without suspending self. If the channel or
+//!         // slot we emit into contains the object from which we emit, then a panic will occur.
+//!             x.signal_c();
+//!         });
 //!     }
-//!
-//!     fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-//!         hub.basic_slot_1.register(item);
-//!     }
-//!     const NAME: &'static str = "MyNode";
 //! }
-//!
-//! // Whenever we get a basic signal we pass it to the register_emits.
-//! impl BasicSignal for MyNode {
-//!     fn basic(&mut self) {
-//!         self.emits.basic_slot_2.emit(|_| println!("Hello world"));
+//! impl SignalC for C {
+//!     fn signal_c(&mut self) {
+//!         println!("C::signal_c: {:?}", self as *mut _);
 //!     }
 //! }
 //!
-//! // ---
+//! // Instantiate `MyHub`.
+//! let mut hub = MyHub::default();
 //!
-//! let mut hub = MyAnchor::new();
-//! // The type annotation is not needed, but shown here to show what to expect.
-//! let item = hub.subscribe(|emits: MyEmitter| MyNode { emits });
-//! hub.basic_slot_1.emit(BasicSignal::basic);
-//! hub.unsubscribe(&item);
+//! // Insert nodes into the hub. Nodes can be cloned and used on their own using the `emit`
+//! // method.
+//! let a = Node::new(A);
+//! hub.signal_a.insert(a.clone());
+//! hub.signal_b.insert(a.clone());
+//! hub.signal_b.insert(Node::new(B));
+//! hub.signal_c.insert(Node::new(C));
 //!
-//! Grapher::new(hub.manager()).graph_to_file("target/example-with-emitter.png").unwrap();
+//! // Run `a` and call `signal_a`.
+//! a.emit(|x| {
+//!     x.signal_a(&hub);
+//! });
 //! ```
 //!
+//! Output:
+//!
+//! ```ignore
+//! A::signal_a: 0x55efd14a8b70
+//! A::signal_b: 0x55efd14a8b70
+//! B::signal_b: 0x55efd14a8bf0
+//! C::signal_c: 0x55efd14a8c50
+//! ```
 #![deny(
     missing_docs,
     trivial_casts,
@@ -174,1177 +97,302 @@
     unused_import_braces,
     unused_qualifications
 )]
+#![feature(coerce_unsized, unsize)]
 
-pub mod feed;
-mod mng;
-mod single;
+pub use self::{channel::Channel, node::Node, slot::Slot};
+use std::cell::{Cell, UnsafeCell};
+
+mod channel;
+mod node;
 mod slot;
-mod traits;
-pub(crate) use self::mng::{ChannelType, Mode};
-pub use self::{
-    mng::{Grapher, Manager},
-    single::Single,
-    slot::Slot,
-    traits::{Anchor, Node},
-};
 
-use std::{cell::RefCell, rc::Rc};
+// ---
+
+#[inline(always)]
+fn borrow(value: &Cell<BorrowFlag>) {
+    value.set(value.get() + 1);
+}
+
+#[inline(always)]
+fn unborrow(value: &Cell<BorrowFlag>) {
+    value.set(value.get() - 1);
+}
+
+#[inline(always)]
+fn borrow_mut(value: &Cell<BorrowFlag>) {
+    value.set(value.get() - 1);
+}
+
+#[inline(always)]
+fn unborrow_mut(value: &Cell<BorrowFlag>) {
+    value.set(value.get() + 1);
+}
+
+#[inline(always)]
+fn is_borrowed(value: &Cell<BorrowFlag>) -> bool {
+    value.get() != 0
+}
+
+#[inline(always)]
+fn is_borrowed_mut(value: &Cell<BorrowFlag>) -> bool {
+    value.get() < 0
+}
+
+type BorrowFlag = isize;
+
+// ---
 
 thread_local! {
-    static STACK: RefCell<Vec<(Mode, Manager)>> = RefCell::new(Vec::new());
+    // `STACK` is parallel to the callstack. The last element represents the current active item
+    // being invoked on a `Channel` or `Slot`. It is inside an `UnsafeCell` because it is only ever
+    // pushed/popped in the same function, and we can prove that borrows are not propagated.
+    static STACK: UnsafeCell<Vec<(*const Cell<BorrowFlag>, *mut ())>> = UnsafeCell::new(Vec::new());
 }
 
-fn assert_active_manager(manager: &Manager) {
-    STACK.with(|x| {
-        assert!(
-            Rc::ptr_eq(
-                &(x.borrow()
-                    .last()
-                    .expect("revent: signal modification outside of Anchor context")
-                    .1)
-                    .0,
-                &manager.0
-            ),
-            "revent: manager is different"
-        );
-    });
+// ---
+
+/// Suspend an arbitrary `&mut` from access.
+pub trait Suspend {
+    /// Suspend this object and run `runner`, which by using another data structure can reborrow
+    /// `&mut Self` without violating the mutable aliasing rules.
+    ///
+    /// Only the last emitted object can be suspended.
+    ///
+    /// # Panics #
+    ///
+    /// Panics if the suspended object is not stored in a [Node], or if the object is not at the
+    /// top of the current node stack.
+    ///
+    /// ```should_panic
+    /// use revent::{Node, Suspend};
+    /// let node1 = Node::new(());
+    /// let node2 = Node::new(());
+    /// node1.emit(|x1| {
+    ///     node2.emit(|x2| {
+    ///         x1.suspend(|| {}); // Panic, `node2` was last emitted, we can't suspend `x1`, which
+    ///         // comes from `node1`.
+    ///     });
+    /// });
+    /// ```
+    fn suspend<F: FnOnce() -> R, R>(&mut self, runner: F) -> R {
+        let last = STACK.with(|x| {
+            // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
+            // for more than immediate mutation or acquiring information.
+            if let Some(last) = unsafe { &mut *x.get() }.last() {
+                *last
+            } else {
+                panic!("revent: suspend: item not expected");
+            }
+        });
+
+        let item: *mut _ = self;
+        if last.1 != item as *mut () {
+            panic!("revent: suspend: item not expected",);
+        }
+
+        // unsafe: The pointer `last.0` to `*const Cell<bool>` is valid because it refers to a
+        // variable on the stack from at least 2 stack frames earlier. The pointer comes from
+        // `Node` which is contained by `Channel` or `Slot`, which guarantees that the pointee
+        // exists.
+        //
+        // We do _not_ need to check the value of the borrow flag since we got `&mut`, so we know
+        // it is guaranteed a mutable borrow.
+        unborrow_mut(unsafe { &*last.0 });
+        let data = (runner)();
+        // unsafe: See above.
+        borrow_mut(unsafe { &*last.0 });
+        data
+    }
+
+    /// Same as [suspend](Suspend::suspend) but takes an immutable reference instead.
+    fn suspend_ref<F: FnOnce() -> R, R>(&self, runner: F) -> R {
+        let last = STACK.with(|x| {
+            // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
+            // for more than immediate mutation or acquiring information.
+            if let Some(last) = unsafe { &mut *x.get() }.last() {
+                *last
+            } else {
+                panic!("revent: suspend_ref: item not expected");
+            }
+        });
+
+        let item: *const _ = &*self;
+        let raw: *const _ = last.1;
+        if raw != item as *const () {
+            panic!("revent: suspend_ref: item not expected");
+        }
+
+        // We _must_ guarantee that this an immutable borrow (corresponding to an `emit_ref`). If
+        // it is not, then our borrow flag won't make sense anymore.
+        if is_borrowed_mut(unsafe { &*last.0 }) {
+            panic!("revent: suspend_ref: called on item that is mutably borrowed");
+        }
+
+        // unsafe: The pointer `last.0` to `*const Cell<bool>` is valid because it refers to a
+        // variable on the stack from at least 2 stack frames earlier. The pointer comes from
+        // `Node` which is contained by `Channel` or `Slot`, which guarantees that the pointee
+        // exists.
+        unborrow(unsafe { &*last.0 });
+        let data = (runner)();
+        // unsafe: See above.
+        borrow(unsafe { &*last.0 });
+        data
+    }
 }
+
+impl<T> Suspend for T {}
+
+// ---
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        feed::{Feed, Feedee, Feeder},
-        Anchor, Manager, Node, Single, Slot,
-    };
-    use std::{cell::RefCell, rc::Rc};
+    use crate::*;
+    use std::cell::Cell;
 
-    #[quickcheck_macros::quickcheck]
-    fn basic(value: usize) {
-        trait BasicSignal {}
+    #[test]
+    #[should_panic(expected = "revent: suspend: item not expected")]
+    fn suspending_on_empty_stack() {
+        ().suspend(|| {});
+    }
 
-        struct MyAnchor {
-            basic_signal: Slot<dyn BasicSignal>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    basic_signal: Slot::new("basic_signal", &mng),
+    #[test]
+    #[should_panic(expected = "revent: suspend_ref: item not expected")]
+    fn suspending_ref_on_empty_stack() {
+        ().suspend_ref(|| {});
+    }
 
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(_: &MyAnchor) -> Emitter {
-                Emitter
-            }
-
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.basic_signal.register(item);
-            }
-            const NAME: &'static str = "MyNode";
-        }
-        impl BasicSignal for MyNode {}
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-
-        for _ in 0..value {
-            hub.subscribe(|_| MyNode);
-        }
-
-        let mut count = 0;
-
-        hub.basic_signal.emit(|_| {
-            count += 1;
+    #[test]
+    #[should_panic(expected = "revent: suspend: item not expected")]
+    fn suspending_invalid_item() {
+        let x = Node::new(());
+        x.emit(|()| {
+            ().suspend(|| {});
         });
-
-        assert_eq!(value, count);
     }
 
     #[test]
-    #[should_panic(
-        expected = "revent: found a recursion during subscription: [MyNode]basic_signal -> basic_signal"
-    )]
-    fn self_subscribing() {
-        trait BasicSignal {}
-
-        struct MyAnchor {
-            basic_signal: Slot<dyn BasicSignal>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    basic_signal: Slot::new("basic_signal", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(hub: &MyAnchor) -> Emitter {
-                let _ = hub.basic_signal.clone();
-                Emitter
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.basic_signal.register(item);
-            }
-            const NAME: &'static str = "MyNode";
-        }
-        impl BasicSignal for MyNode {}
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-
-        hub.subscribe(|_| MyNode);
+    #[should_panic(expected = "revent: suspend_ref: item not expected")]
+    fn suspending_ref_invalid_item() {
+        let x = Node::new(());
+        x.emit(|()| {
+            ().suspend_ref(|| {});
+        });
     }
 
     #[test]
-    #[should_panic(
-        expected = "revent: found a recursion during subscription: [MyNode]basic_signal -> [OtherNode]other_signal -> basic_signal"
-    )]
-    fn transitive_self_subscription() {
-        trait BasicSignal {}
-        trait OtherSignal {}
-
-        struct MyAnchor {
-            basic_signal: Slot<dyn BasicSignal>,
-            other_signal: Slot<dyn OtherSignal>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    basic_signal: Slot::new("basic_signal", &mng),
-                    other_signal: Slot::new("other_signal", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(hub: &MyAnchor) -> Emitter {
-                let _ = hub.other_signal.clone();
-                Emitter
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.basic_signal.register(item);
-            }
-            const NAME: &'static str = "MyNode";
-        }
-        impl BasicSignal for MyNode {}
-
-        // ---
-
-        struct OtherNodeNode;
-        struct OtherNode;
-        impl Node<MyAnchor, OtherNodeNode> for OtherNode {
-            fn register_emits(hub: &MyAnchor) -> OtherNodeNode {
-                let _ = hub.basic_signal.clone();
-                OtherNodeNode
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.other_signal.register(item);
-            }
-            const NAME: &'static str = "OtherNode";
-        }
-        impl OtherSignal for OtherNode {}
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-
-        hub.subscribe(|_| MyNode);
-        hub.subscribe(|_| OtherNode);
+    #[should_panic(expected = "revent: suspend_ref: called on item that is mutably borrowed")]
+    fn suspending_ref_of_emit() {
+        let x = Node::new(());
+        x.emit(|x| {
+            (&*x).suspend_ref(|| {});
+        });
     }
 
-    #[quickcheck_macros::quickcheck]
-    fn register_listens_and_unsubscribe(subscribes: usize) {
-        trait BasicSignal {}
+    #[test]
+    #[should_panic(expected = "revent: emit_ref: accessing already mutably borrowed item")]
+    fn emit_ref_after_emit() {
+        let x = Node::new(());
+        x.emit(|()| {
+            x.emit_ref(|()| {});
+        });
+    }
 
-        struct MyAnchor {
-            basic_signal: Slot<dyn BasicSignal>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    basic_signal: Slot::new("basic_signal", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
+    #[test]
+    #[should_panic(expected = "revent: emit: accessing already borrowed item")]
+    fn emit_after_emit_ref() {
+        let x = Node::new(());
+        x.emit_ref(|()| {
+            x.emit(|()| {});
+        });
+    }
 
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(_: &MyAnchor) -> Emitter {
-                Emitter
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.basic_signal.register(item);
-            }
-            const NAME: &'static str = "MyNode";
-        }
-        impl BasicSignal for MyNode {}
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-
-        let mut items = Vec::with_capacity(subscribes);
-        for _ in 0..subscribes {
-            items.push(hub.subscribe(|_| MyNode));
-        }
-
-        {
-            let mut count = 0;
-            hub.basic_signal.emit(|_| {
-                count += 1;
+    #[test]
+    fn ref_suspend_followed_by_suspend() {
+        let node = Node::new(());
+        node.emit_ref(|x| {
+            x.suspend_ref(|| {
+                node.emit(|x| {
+                    x.suspend(|| {});
+                });
             });
-            assert_eq!(subscribes, count);
-        }
-
-        for item in items.drain(..) {
-            hub.unsubscribe(&item);
-        }
-
-        {
-            let mut count = 0;
-            hub.basic_signal.emit(|_| {
-                count += 1;
-            });
-            assert_eq!(0, count);
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: unable to deregister nonexistent item")]
-    fn double_unsubscribe() {
-        trait BasicSignal {}
-
-        struct MyAnchor {
-            basic_signal: Slot<dyn BasicSignal>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    basic_signal: Slot::new("basic_signal", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(_: &MyAnchor) -> Emitter {
-                Emitter
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.basic_signal.register(item);
-            }
-            const NAME: &'static str = "MyNode";
-        }
-        impl BasicSignal for MyNode {}
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        let item = hub.subscribe(|_| MyNode);
-        hub.unsubscribe(&item);
-        hub.unsubscribe(&item);
-    }
-
-    #[test]
-    fn double_unsubscribe_deaf_node() {
-        struct MyAnchor {
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self { mng }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-        struct MyNode;
-        impl Node<MyAnchor, Emitter> for MyNode {
-            fn register_emits(_: &MyAnchor) -> Emitter {
-                Emitter
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "MyNode";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        let item = hub.subscribe(|_| MyNode);
-        hub.unsubscribe(&item);
-        hub.unsubscribe(&item);
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: name is already registered to this manager: \"signal\"")]
-    fn double_subscription() {
-        let mng = Manager::new();
-
-        Slot::<()>::new("signal", &mng);
-        Single::<()>::new("signal", &mng);
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: signal modification outside of Anchor context")]
-    fn using_register_emits_outside_subscribe() {
-        struct MyAnchor {
-            slot: Slot<()>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    slot: Slot::new("slot", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        let hub = MyAnchor::new();
-        let _ = hub.slot.clone();
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "revent: not allowed to clone more than once per subscription: \"slot\""
-    )]
-    fn double_emit() {
-        struct MyAnchor {
-            slot: Slot<()>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    slot: Slot::new("slot", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Emitter;
-
-        // ---
-
-        struct Listener;
-        impl Node<MyAnchor, Emitter> for Listener {
-            fn register_emits(hub: &MyAnchor) -> Emitter {
-                let _ = hub.slot.clone();
-                let _ = hub.slot.clone();
-                Emitter
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "Listener";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        hub.subscribe(|_| Listener);
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "revent: not allowed to register more than once per subscription: \"slot\""
-    )]
-    fn double_register() {
-        struct MyAnchor {
-            slot: Slot<Listener>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    slot: Slot::new("slot", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Listener;
-        impl Node<MyAnchor, ()> for Listener {
-            fn register_emits(_: &MyAnchor) -> () {
-                ()
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                hub.slot.register(item.clone());
-                hub.slot.register(item);
-            }
-            const NAME: &'static str = "Listener";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        hub.subscribe(|_| Listener);
-    }
-
-    #[test]
-    fn nested_subscription_same_slot() {
-        struct MyAnchor {
-            slot: Slot<Listener>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    slot: Slot::new("slot", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Listener {
-            count: usize,
-        }
-        impl Node<MyAnchor, ()> for Listener {
-            fn register_emits(_: &MyAnchor) -> () {
-                ()
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                let count = item.borrow().count;
-                if count != 0 {
-                    hub.subscribe(|_| Listener { count: count - 1 });
-                }
-                hub.slot.register(item);
-            }
-            const NAME: &'static str = "Listener";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        hub.subscribe(|_| Listener { count: 100 });
-
-        let mut count = 0;
-        hub.slot.emit(|x| {
-            assert_eq!(count, x.count);
-            count += 1;
         });
-        assert_eq!(101, count);
     }
 
     #[test]
-    fn using_queues() {
-        struct MyAnchor {
-            queue: Feed<usize>,
-            mng: Manager,
+    fn recursion() {
+        trait Trait1 {
+            fn channel_1_function(&mut self, hub: &Hub);
         }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, 1),
-                    mng,
+
+        struct Hub {
+            channel1: Channel<dyn Trait1>,
+        }
+
+        let mut hub = Hub {
+            channel1: Channel::new(),
+        };
+
+        struct My {
+            value: usize,
+        };
+
+        impl Trait1 for My {
+            fn channel_1_function(&mut self, hub: &Hub) {
+                if self.value == 0 {
+                    return;
                 }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
 
-        // ---
+                self.value -= 1;
 
-        struct FeederNode;
-        impl Node<MyAnchor, ()> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.feeder().feed(0);
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            queue: Feedee<usize>,
-        }
-        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        impl FeedeeNode {
-            fn pop(&mut self) -> Option<usize> {
-                self.queue.pop()
+                self.suspend(|| {
+                    hub.channel1.emit(|item| {
+                        item.channel_1_function(hub);
+                    });
+                });
             }
         }
 
-        // ---
+        hub.channel1.insert(Node::new(My { value: 12 }));
 
-        let mut hub = MyAnchor::new();
-        let feedee = hub.subscribe(|queue| FeedeeNode { queue });
-        hub.subscribe(|_| FeederNode);
-
-        assert_eq!(Some(0), feedee.borrow_mut().pop());
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: name is already registered to this manager: \"lorem\"")]
-    fn double_receiver() {
-        let mng = Manager::new();
-
-        Feed::<()>::new("lorem", &mng, 1);
-        Slot::<()>::new("lorem", &mng);
-    }
-
-    #[test]
-    fn recur_via_feed() {
-        struct MyAnchor {
-            feed: Feed<()>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    feed: Feed::new("queue", &mng, 1),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct MyNode;
-        impl Node<MyAnchor, ()> for MyNode {
-            fn register_emits(anchor: &MyAnchor) {
-                let _ = anchor.feed.feeder();
-                let _ = anchor.feed.feedee();
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "MyNode";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        hub.subscribe(|_| MyNode);
-    }
-
-    #[test]
-    fn one_feeder_to_many_feedees() {
-        struct MyAnchor {
-            queue: Feed<usize>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, 2),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct FeederNode;
-        impl Node<MyAnchor, ()> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.feeder().feed(0);
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            queue: Feedee<usize>,
-        }
-        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        impl FeedeeNode {
-            fn pop(&mut self) -> Option<usize> {
-                self.queue.pop()
-            }
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        let mut subs = Vec::new();
-        for _ in 0..100 {
-            subs.push(hub.subscribe(|queue| FeedeeNode { queue }));
-        }
-        hub.subscribe(|_| FeederNode);
-
-        for sub in &subs {
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(None, sub.borrow_mut().pop());
-        }
-        hub.subscribe(|_| FeederNode);
-        hub.subscribe(|_| FeederNode);
-        for sub in subs {
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(None, sub.borrow_mut().pop());
-        }
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "revent: feedee queue exceeds maximum size: 1, channel: \"queue\", feedee: \"FeedeeNode\""
-    )]
-    fn feeder_channel_limit_single() {
-        struct MyAnchor {
-            queue: Feed<usize>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, 1),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct FeederNode;
-        impl Node<MyAnchor, ()> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.feeder().feed(0);
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            _queue: Feedee<usize>,
-        }
-        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        let _feedee = hub.subscribe(|queue| FeedeeNode { _queue: queue });
-        hub.subscribe(|_| FeederNode);
-        hub.subscribe(|_| FeederNode);
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "revent: feedee queue exceeds maximum size: 1, channel: \"queue\", feedee: \"FeedeeNode\""
-    )]
-    fn feeder_channel_limit() {
-        struct MyAnchor {
-            queue: Feed<usize>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, 1),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct FeederNode;
-        impl Node<MyAnchor, ()> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) {
-                anchor.queue.feeder().feed(0);
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            queue: Feedee<usize>,
-        }
-        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        impl FeedeeNode {
-            fn pop(&mut self) -> Option<usize> {
-                self.queue.pop()
-            }
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        let mut subs = Vec::new();
-        for _ in 0..100 {
-            subs.push(hub.subscribe(|queue| FeedeeNode { queue }));
-        }
-        hub.subscribe(|_| FeederNode);
-
-        for sub in &subs {
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(None, sub.borrow_mut().pop());
-        }
-        hub.subscribe(|_| FeederNode);
-        hub.subscribe(|_| FeederNode);
-        for sub in subs {
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(Some(0), sub.borrow_mut().pop());
-            assert_eq!(None, sub.borrow_mut().pop());
-        }
-    }
-
-    #[quickcheck_macros::quickcheck]
-    fn feed_size_checks(max_size: usize) {
-        struct MyAnchor {
-            queue: Feed<()>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new(max_size: usize) -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, max_size),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct FeederNode {
-            queue: Feeder<()>,
-        }
-        impl Node<MyAnchor, Feeder<()>> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) -> Feeder<()> {
-                anchor.queue.feeder()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-        impl FeederNode {
-            fn push(&mut self) {
-                self.queue.feed(());
-            }
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            _queue: Feedee<()>,
-        }
-        impl Node<MyAnchor, Feedee<()>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<()> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new(max_size);
-        let _feedee = hub.subscribe(|queue| FeedeeNode { _queue: queue });
-        let feeder = hub.subscribe(|queue| FeederNode { queue });
-
-        for _ in 0..max_size {
-            feeder.borrow_mut().push();
-        }
-    }
-
-    #[test]
-    fn one_feeder_to_many_feedees_disable_enable() {
-        struct MyAnchor {
-            queue: Feed<usize>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self {
-                    queue: Feed::new("queue", &mng, 2),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct FeederNode {
-            count: usize,
-            queue: Feeder<usize>,
-        }
-        impl Node<MyAnchor, Feeder<usize>> for FeederNode {
-            fn register_emits(anchor: &MyAnchor) -> Feeder<usize> {
-                anchor.queue.feeder()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeederNode";
-        }
-        impl FeederNode {
-            fn send(&mut self) {
-                self.queue.feed(self.count);
-                self.count += 1;
-            }
-        }
-
-        // ---
-
-        struct FeedeeNode {
-            queue: Feedee<usize>,
-        }
-        impl Node<MyAnchor, Feedee<usize>> for FeedeeNode {
-            fn register_emits(anchor: &MyAnchor) -> Feedee<usize> {
-                anchor.queue.feedee()
-            }
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "FeedeeNode";
-        }
-
-        impl FeedeeNode {
-            fn new(mut queue: Feedee<usize>, enable: bool) -> Self {
-                if !enable {
-                    assert!(queue.disable());
-                }
-                Self { queue }
-            }
-            fn pop(&mut self) -> Option<usize> {
-                self.queue.pop()
-            }
-            fn enable(&mut self) -> bool {
-                self.queue.enable()
-            }
-            fn disable(&mut self) -> bool {
-                self.queue.disable()
-            }
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-
-        let feedee_1 = hub.subscribe(|queue| FeedeeNode::new(queue, true));
-        let feedee_2 = hub.subscribe(|queue| FeedeeNode::new(queue, false));
-        let feeder = hub.subscribe(|queue| FeederNode { count: 0, queue });
-
-        let mut fe1 = feedee_1.borrow_mut();
-        let mut fe2 = feedee_2.borrow_mut();
-        let mut fr = feeder.borrow_mut();
-
-        fr.send();
-
-        assert_eq!(Some(0), fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        assert_eq!(None, fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        fr.send();
-        fr.send();
-
-        assert_eq!(Some(1), fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        assert_eq!(Some(2), fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        assert!(fe2.enable());
-
-        fr.send();
-
-        assert_eq!(Some(3), fe1.pop());
-        assert_eq!(Some(3), fe2.pop());
-
-        assert!(!fe2.enable());
-        assert!(fe1.disable());
-
-        assert_eq!(None, fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        fr.send();
-
-        assert_eq!(None, fe1.pop());
-        assert_eq!(Some(4), fe2.pop());
-
-        assert!(fe2.disable());
-
-        fr.send();
-
-        assert_eq!(None, fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        assert!(fe1.enable());
-        assert!(fe2.enable());
-
-        assert_eq!(None, fe1.pop());
-        assert_eq!(None, fe2.pop());
-
-        fr.send();
-
-        assert_eq!(Some(6), fe1.pop());
-        assert_eq!(Some(6), fe2.pop());
-
-        drop(fe2);
-        drop(feedee_2);
-        assert_eq!(None, fe1.pop());
-
-        for idx in 7..30 {
-            fr.send();
-            assert_eq!(Some(idx), fe1.pop());
-        }
-    }
-}
-
-#[cfg(feature = "logging")]
-#[cfg(test)]
-mod logging_tests {
-    use crate::{Anchor, Manager, Node, Slot};
-    use slog::{o, Drain, Logger};
-    use std::{cell::RefCell, rc::Rc};
-
-    #[test]
-    fn testing_logger_functionality() {
-        struct MyAnchor {
-            slot: Slot<Listener>,
-            mng: Manager,
-        }
-        impl MyAnchor {
-            fn new() -> Self {
-                let decorator = slog_term::TermDecorator::new().build();
-                let drain = slog_term::FullFormat::new(decorator).build().fuse();
-                let drain = slog_async::Async::new(drain).build().fuse();
-                let mng = Manager::with_logger(Logger::root(drain, o!()));
-                Self {
-                    slot: Slot::new("slot", &mng),
-                    mng,
-                }
-            }
-        }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
-
-        // ---
-
-        struct Listener {
-            count: usize,
-        }
-        impl Node<MyAnchor, ()> for Listener {
-            fn register_emits(_: &MyAnchor) -> () {
-                ()
-            }
-            fn register_listens(hub: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-                let count = item.borrow().count;
-                if count != 0 {
-                    hub.subscribe(|_| Listener { count: count - 1 });
-                }
-                hub.slot.register(item);
-            }
-            const NAME: &'static str = "Listener";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        hub.subscribe(|_| Listener { count: 100 });
-
-        let mut count = 0;
-        hub.slot.emit(|x| {
-            assert_eq!(count, x.count);
-            count += 1;
+        hub.channel1.emit(|x| {
+            x.channel_1_function(&hub);
         });
-        assert_eq!(101, count);
     }
 
-    #[quickcheck_macros::quickcheck]
-    fn many_subscribes_unsubscribes(value: usize) {
-        struct MyAnchor {
-            mng: Manager,
+    #[test]
+    fn recursion_ref() {
+        trait Trait {
+            fn function(&self, channel: &Channel<dyn Trait>);
         }
-        impl MyAnchor {
-            fn new() -> Self {
-                let mng = Manager::new();
-                Self { mng }
+
+        let mut channel = Channel::<dyn Trait>::new();
+
+        struct My {
+            value: Cell<usize>,
+        };
+
+        impl Trait for My {
+            fn function(&self, channel: &Channel<dyn Trait>) {
+                if self.value.get() == 0 {
+                    return;
+                }
+
+                self.value.set(self.value.get() - 1);
+
+                self.suspend_ref(|| {
+                    channel.emit_ref(|item| {
+                        item.function(channel);
+                    });
+                });
             }
         }
-        impl Anchor for MyAnchor {
-            fn manager(&self) -> &Manager {
-                &self.mng
-            }
-        }
 
-        // ---
+        channel.insert(Node::new(My {
+            value: Cell::new(12),
+        }));
 
-        struct Listener;
-        impl Node<MyAnchor, ()> for Listener {
-            fn register_emits(_: &MyAnchor) {}
-            fn register_listens(_: &mut MyAnchor, _: Rc<RefCell<Self>>) {}
-            const NAME: &'static str = "Listener";
-        }
-
-        // ---
-
-        let mut hub = MyAnchor::new();
-        for _ in 0..value {
-            let item = hub.subscribe(|_| Listener);
-            hub.unsubscribe(&item);
-        }
+        channel.emit_ref(|x| {
+            x.function(&channel);
+        });
     }
 }

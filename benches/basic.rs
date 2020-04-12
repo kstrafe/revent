@@ -1,87 +1,115 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use revent::Anchor;
-
-mod setup {
-    use revent::{Anchor, Manager, Node, Slot};
-    use std::{cell::RefCell, rc::Rc};
-
-    pub trait EventHandler {
-        fn event(&mut self);
-    }
-
-    pub struct MyAnchor {
-        pub basic: Slot<dyn EventHandler>,
-        pub manager: Manager,
-    }
-
-    impl Anchor for MyAnchor {
-        fn manager(&self) -> &Manager {
-            &self.manager
-        }
-    }
-
-    impl MyAnchor {
-        pub fn new() -> Self {
-            let manager = Manager::new();
-            Self {
-                basic: Slot::new("basic", &manager),
-                manager,
-            }
-        }
-    }
-
-    pub struct MyEventHandler;
-    impl EventHandler for MyEventHandler {
-        fn event(&mut self) {}
-    }
-
-    impl Node<MyAnchor, ()> for MyEventHandler {
-        fn register_emits(_: &MyAnchor) -> () {
-            ()
-        }
-
-        fn register_listens(anchor: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-            anchor.basic.register(item);
-        }
-        const NAME: &'static str = "MyEventHandler";
-    }
-}
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use revent::{Channel, Node, Slot, Suspend};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("empty emit", |b| {
-        let mut hub = setup::MyAnchor::new();
-        b.iter(|| {
-            hub.basic.emit(|_| {});
-        });
-    });
-
-    c.bench_function("single emit", |b| {
-        let mut hub = setup::MyAnchor::new();
-        hub.subscribe(|_| setup::MyEventHandler);
-        b.iter(|| {
-            hub.basic.emit(|x| x.event());
-        });
-    });
-
-    c.bench_function("many emit", |b| {
-        let mut hub = setup::MyAnchor::new();
-        for _ in 0..1000 {
-            hub.subscribe(|_| setup::MyEventHandler);
+    c.bench_function("emit", |b| {
+        trait Trait {
+            fn function(&mut self);
         }
+
+        impl Trait for () {
+            fn function(&mut self) {
+                black_box(self);
+            }
+        }
+
+        let mut channel: Channel<dyn Trait> = Channel::new();
+
+        channel.insert(Node::new(()));
+
         b.iter(|| {
-            hub.basic.emit(|x| x.event());
+            channel.emit(|x| x.function());
+            black_box(&mut channel);
         });
     });
 
-    c.bench_function("subscribe and remove", |b| {
-        let mut hub = setup::MyAnchor::new();
-        b.iter(|| {
-            let mut items = (0..1000)
-                .map(|_| hub.subscribe(|_| setup::MyEventHandler))
-                .collect::<Vec<_>>();
-            for item in items.drain(..) {
-                hub.unsubscribe(&item);
+    c.bench_function("recursion", |b| {
+        trait Trait {
+            fn function(&mut self, hub: &Hub);
+        }
+        trait Reset {
+            fn reset(&mut self);
+        }
+
+        #[derive(Default)]
+        struct Hub {
+            channel: Channel<dyn Trait>,
+            reset: Slot<dyn Reset>,
+        }
+
+        let mut hub = Hub::default();
+
+        struct Subscriber {
+            value: usize,
+        };
+
+        impl Trait for Subscriber {
+            fn function(&mut self, hub: &Hub) {
+                if self.value == 0 {
+                    return;
+                }
+
+                self.value -= 1;
+
+                self.suspend(|| {
+                    hub.channel.emit(|item| {
+                        item.function(hub);
+                    });
+                });
+
+                black_box(self.value);
             }
+        }
+
+        impl Reset for Subscriber {
+            fn reset(&mut self) {
+                self.value = 1000;
+            }
+        }
+
+        let x = Node::new(Subscriber { value: 1000 });
+        hub.channel.insert(x.clone());
+        hub.reset.insert(x);
+
+        b.iter(|| {
+            hub.channel.emit(|x| {
+                x.function(&hub);
+            });
+            hub.reset.emit(|x| x.reset());
+
+            black_box(&mut hub);
+        });
+    });
+
+    c.bench_function("node access", |b| {
+        let node = Node::new(());
+
+        b.iter(|| {
+            node.emit(|x| {
+                black_box(x);
+            });
+        });
+    });
+
+    c.bench_function("node suspend", |b| {
+        let node = Node::new(());
+
+        b.iter(|| {
+            node.emit(|x| {
+                x.suspend(|| {
+                    black_box(&node);
+                });
+            });
+        });
+    });
+
+    c.bench_function("node ref access", |b| {
+        let node = Node::new(());
+
+        b.iter(|| {
+            node.emit_ref(|x| {
+                black_box(x);
+            });
         });
     });
 }

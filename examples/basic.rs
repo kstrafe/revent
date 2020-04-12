@@ -1,98 +1,77 @@
-use revent::{Anchor, Grapher, Manager, Node, Slot};
-use std::{cell::RefCell, rc::Rc};
+use revent::{Channel, Node, Slot, Suspend};
 
-// 1. Define your events using traits.
-//
-// You define your own traits for various event types.
-// An object can listen to multiple event types by implementing multiple traits.
-// In this example we just define a single trait for a single type.
-pub trait EventHandler {
-    fn event(&mut self);
+// Create signal traits.
+trait SignalA {
+    fn signal_a(&mut self, hub: &MyHub);
+}
+trait SignalB {
+    fn signal_b(&mut self, hub: &MyHub);
+}
+trait SignalC {
+    fn signal_c(&mut self);
 }
 
-// 2. Create an event node - a collection of event slots.
-#[derive(Debug)]
-struct MyAnchor {
-    basic: Slot<dyn EventHandler>,
-    manager: Manager,
+// Create a struct of channels and slots based on your signal traits.
+#[derive(Default)]
+struct MyHub {
+    signal_a: Channel<dyn SignalA>,
+    signal_b: Channel<dyn SignalB>, // A channel contains any number of nodes.
+    signal_c: Slot<dyn SignalC>,    // A slot contains only a single node.
 }
 
-// 2a. The node only needs to implement `manager`.
-impl Anchor for MyAnchor {
-    fn manager(&self) -> &Manager {
-        &self.manager
+// Create trait implementors. Note that `A` implements both `SignalA` and `SignalB`.
+struct A;
+struct B;
+struct C;
+
+impl SignalA for A {
+    fn signal_a(&mut self, hub: &MyHub) {
+        println!("A::signal_a: {:?}", self as *mut _);
+
+        self.suspend(|| {
+            // Suspend here in order to not panic. `signal_b` also contains this
+            hub.signal_b.emit(|x| {
+                // object, so we must ensure we relinquish access to `&mut`.
+                x.signal_b(hub);
+            });
+        });
     }
 }
-
-// 2b. Construct the new node. A manager must be supplied to all slots.
-impl MyAnchor {
-    fn new() -> Self {
-        let manager = Manager::new();
-        Self {
-            basic: Slot::new("basic", &manager),
-            manager,
-        }
+impl SignalB for A {
+    fn signal_b(&mut self, _: &MyHub) {
+        println!("A::signal_b: {:?}", self as *mut _);
+    }
+}
+impl SignalB for B {
+    fn signal_b(&mut self, hub: &MyHub) {
+        println!("B::signal_b: {:?}", self as *mut _);
+        hub.signal_c.emit(|x| {
+            // We can also emit without suspending self. If the channel or
+            // slot we emit into contains the object from which we emit, then a panic will occur.
+            x.signal_c();
+        });
+    }
+}
+impl SignalC for C {
+    fn signal_c(&mut self) {
+        println!("C::signal_c: {:?}", self as *mut _);
     }
 }
 
 fn main() {
-    // 3. Construct a new node.
-    let mut hub = MyAnchor::new();
+    // Instantiate `MyHub`.
+    let mut hub = MyHub::default();
 
-    // 4. Add instances of the hub traits.
-    //
-    // We implement the trait for a type so it can be inserted into a channel in the hub.
-    struct MyEventHandler;
-    impl EventHandler for MyEventHandler {
-        fn event(&mut self) {
-            println!("MyEventHandler: Hello world");
-        }
-    }
+    // Insert nodes into the hub. Nodes can be cloned and used on their own using the `emit`
+    // method.
+    let a = Node::new(A);
+    hub.signal_a.insert(a.clone());
+    hub.signal_b.insert(a.clone());
+    hub.signal_b.insert(Node::new(B));
+    hub.signal_c.insert(Node::new(C));
 
-    // 5. Implement `Node` for the event handler.
-    //
-    // Node informs the hub how to build and subscribe the type to slots. It also
-    // ensures that we don't have any recursive subscriptions.
-    impl Node<MyAnchor, ()> for MyEventHandler {
-        fn register_emits(_: &MyAnchor) -> () {
-            ()
-        }
-        fn register_listens(anchor: &mut MyAnchor, item: Rc<RefCell<Self>>) {
-            // Tells the hub anchor which slots to listen to.
-            // node.basic.register(item.clone());
-            anchor.basic.register(item);
-            // node.basic.clone();
-        }
-        const NAME: &'static str = "MyEventHandler";
-    }
-
-    // 6. Construct an instance inside the hub.
-    let item = hub.subscribe(|_| MyEventHandler);
-
-    // 7. Emit events.
-    //
-    // We simply call `emit` on the slot we'd like to emit an event to. We then give a lambda that
-    // takes a reference to the `dyn Trait` for that signal handler. This allows us to use the return type
-    // or send in complex types with lifetime parameters.
-    //
-    // The lambda is called for every node in the slot in subscription order.
-    hub.basic.emit(|x| {
-        x.event();
+    // Run `a` and call `signal_a`.
+    a.emit(|x| {
+        x.signal_a(&hub);
     });
-
-    println!("{:#?}", hub);
-
-    // 8. Remove the node.
-    //
-    // To showcase how we can remove subscribers, just insert the item returned from `subscribe`.
-    // This uses the item's `register_listens` method to figure out which slots to unsubscribe from.
-    hub.unsubscribe(&item);
-
-    // 9. Write a picture of the graph to disk.
-    //
-    // Can be done right after all `subscribe` calls have finished. Unsubscribing does not remove
-    // nodes from the generated graph.
-    Grapher::new(hub.manager())
-        .graph_to_file("target/basic.png")
-        .unwrap();
 }
