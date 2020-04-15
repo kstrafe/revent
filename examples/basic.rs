@@ -65,9 +65,9 @@ fn main() {
     // Insert nodes into the hub. Nodes can be cloned and used on their own using the `emit`
     // method.
     let a = Node::new(A);
-    hub.signal_a.insert(a.clone());
-    hub.signal_b.insert(a.clone());
-    hub.signal_b.insert(Node::new(B));
+    hub.signal_a.insert(0, a.clone());
+    hub.signal_b.insert(0, a.clone());
+    hub.signal_b.insert(0, Node::new(B));
     hub.signal_c.insert(Node::new(C));
 
     // Run `a` and call `signal_a`.

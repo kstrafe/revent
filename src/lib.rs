@@ -1,95 +1,58 @@
-//! Synchronous, recursive event system.
+//! Synchronous and recursive event system.
 //!
 //! # Introduction #
 //!
 //! An event system is a collection of objects that can receive and send signals.
 //!
-//! In `revent` we construct something called a `hub` which contains [Channel]s and/or [Slot]s.
-//! Each such signal container is just a list of [Node]s (objects) interested in said signal.
-//!
-//! Emitting an event is as simple as just running a function on the relevant channel.
-//!
-//! `revent`'s types ensure that we do _not_ need [RefCell](std::cell::RefCell), and that we do not
-//! accidentally mutably alias. Recursion can be achieved by suspending access to an object's `&mut
-//! Self`.
+//! In `revent` we construct something called a [Node] containing an object of interest. This
+//! object can invoke objects in other `node`s, which in turn can invoke other objects - including
+//! the originator - safely. This is done by [suspend](crate::Suspend::suspend)ing the `&mut self` to the contents of a node.
 //!
 //! # Example #
 //!
 //! ```
-//! use revent::{Channel, Node, Slot, Suspend};
+//! use revent::Node;
 //!
-//! // Create signal traits.
-//! trait SignalA { fn signal_a(&mut self, hub: &MyHub); }
-//! trait SignalB { fn signal_b(&mut self, hub: &MyHub); }
-//! trait SignalC { fn signal_c(&mut self); }
+//! let number = Node::new(123);
 //!
-//! // Create a struct of channels and slots based on your signal traits.
-//! #[derive(Default)]
-//! struct MyHub {
-//!     signal_a: Channel<dyn SignalA>,
-//!     signal_b: Channel<dyn SignalB>, // A channel contains any number of nodes.
-//!     signal_c: Slot<dyn SignalC>, // A slot contains only a single node.
-//! }
-//!
-//! // Create trait implementors. Note that `A` implements both `SignalA` and `SignalB`.
-//! struct A; struct B; struct C;
-//!
-//! impl SignalA for A {
-//!     fn signal_a(&mut self, hub: &MyHub) {
-//!         println!("A::signal_a: {:?}", self as *mut _);
-//!
-//!         self.suspend(|| { // Suspend here in order to not panic. `signal_b` also contains this
-//!             hub.signal_b.emit(|x| { // object, so we must ensure we relinquish access to `&mut`.
-//!                 x.signal_b(hub);
-//!             });
-//!         });
-//!     }
-//! }
-//! impl SignalB for A {
-//!     fn signal_b(&mut self, _: &MyHub) {
-//!         println!("A::signal_b: {:?}", self as *mut _);
-//!     }
-//! }
-//! impl SignalB for B {
-//!     fn signal_b(&mut self, hub: &MyHub) {
-//!         println!("B::signal_b: {:?}", self as *mut _);
-//!         hub.signal_c.emit(|x| { // We can also emit without suspending self. If the channel or
-//!         // slot we emit into contains the object from which we emit, then a panic will occur.
-//!             x.signal_c();
-//!         });
-//!     }
-//! }
-//! impl SignalC for C {
-//!     fn signal_c(&mut self) {
-//!         println!("C::signal_c: {:?}", self as *mut _);
-//!     }
-//! }
-//!
-//! // Instantiate `MyHub`.
-//! let mut hub = MyHub::default();
-//!
-//! // Insert nodes into the hub. Nodes can be cloned and used on their own using the `emit`
-//! // method.
-//! let a = Node::new(A);
-//! hub.signal_a.insert(a.clone());
-//! hub.signal_b.insert(a.clone());
-//! hub.signal_b.insert(Node::new(B));
-//! hub.signal_c.insert(Node::new(C));
-//!
-//! // Run `a` and call `signal_a`.
-//! a.emit(|x| {
-//!     x.signal_a(&hub);
+//! number.emit(|n| {
+//!     println!("{}", *n);
+//!     *n = 100;
+//!     println!("{}", *n);
 //! });
 //! ```
 //!
-//! Output:
+//! See the documentation for [Channel] and [Slot] and [Suspend] for examples.
 //!
-//! ```ignore
-//! A::signal_a: 0x55efd14a8b70
-//! A::signal_b: 0x55efd14a8b70
-//! B::signal_b: 0x55efd14a8bf0
-//! C::signal_c: 0x55efd14a8c50
+//! # Intent #
+//!
+//! This library is intended to be used as a "suspendable `RefCell`" by a bunch of objects which
+//! wish to communicate with each other without using a central mediator object.
+//!
+//! For instance, one can create a `revent::Channel<dyn MyTrait>` which contains objects of
+//! interest, where each object can inside its own handler do something along the lines of:
 //! ```
+//! use revent::{Channel, Suspend};
+//! trait MyTrait {
+//!     fn function(&mut self, channel: &Channel<dyn MyTrait>);
+//! }
+//!
+//! struct MyObject;
+//! impl MyTrait for MyObject {
+//!     fn function(&mut self, channel: &Channel<dyn MyTrait>) {
+//!         // Do something...
+//!         self.suspend(|| {
+//!             channel.emit(|x| {
+//!                 x.function(channel);
+//!             });
+//!         });
+//!         // Do something else...
+//!     }
+//! }
+//! ```
+//!
+//! The above allows the object to emit a signal on a channel it is part of, even calling itself
+//! recursively without mutably aliasing by suspending `&mut self`.
 #![deny(
     missing_docs,
     trivial_casts,
@@ -99,6 +62,7 @@
 )]
 #![feature(coerce_unsized, unsize)]
 
+use self::trace::Trace;
 pub use self::{channel::Channel, node::Node, slot::Slot};
 use std::{
     cell::{Cell, UnsafeCell},
@@ -108,18 +72,9 @@ use std::{
 mod channel;
 mod node;
 mod slot;
+mod trace;
 
 // ---
-
-#[inline(always)]
-fn borrow(value: &Cell<BorrowFlag>) {
-    value.set(value.get() + 1);
-}
-
-#[inline(always)]
-fn unborrow(value: &Cell<BorrowFlag>) {
-    value.set(value.get() - 1);
-}
 
 #[inline(always)]
 fn borrow_mut(value: &Cell<BorrowFlag>) {
@@ -136,25 +91,20 @@ fn is_borrowed(value: &Cell<BorrowFlag>) -> bool {
     value.get() != 0
 }
 
-#[inline(always)]
-fn is_borrowed_mut(value: &Cell<BorrowFlag>) -> bool {
-    value.get() < 0
-}
-
 type BorrowFlag = isize;
 
 // ---
 
 thread_local! {
     // `STACK` is parallel to the callstack. The last element represents the current active item
-    // being invoked on a `Channel` or `Slot`. It is inside an `UnsafeCell` because it is only ever
+    // being invoked on a `Node`. It is inside an `UnsafeCell` because it is only ever
     // pushed/popped in the same function, and we can prove that borrows are not propagated.
     static STACK: UnsafeCell<Vec<(*const Cell<BorrowFlag>, *mut (), usize)>> = UnsafeCell::new(Vec::new());
 }
 
 // ---
 
-/// Suspend an arbitrary `&mut` from access.
+/// Suspend an arbitrary reference from access.
 pub trait Suspend {
     /// Suspend this object and run `runner`, which by using another data structure can reborrow
     /// `&mut Self` without violating the mutable aliasing rules.
@@ -187,23 +137,18 @@ pub trait Suspend {
             if let Some(last) = unsafe { &mut *x.get() }.last() {
                 *last
             } else {
-                panic!("revent: suspend: item not expected");
+                panic!("revent: suspend: not inside node context");
             }
         });
 
         let item: *mut _ = self;
-        if last.1 != item as *mut () {
+        if last.1 != item as *mut () || last.2 != mem::size_of::<Self>() {
             panic!("revent: suspend: item not expected",);
         }
 
-        if last.2 != mem::size_of::<Self>() {
-            panic!("revent: suspend: item not expected",);
-        }
-
-        // unsafe: The pointer `last.0` to `*const Cell<bool>` is valid because it refers to a
+        // unsafe: The pointer `last.0` to `*const Cell<BorrowFlag>` is valid because it refers to a
         // variable on the stack from at least 2 stack frames earlier. The pointer comes from
-        // `Node` which is contained by `Channel` or `Slot`, which guarantees that the pointee
-        // exists.
+        // `Node` which guarantees that the pointee exists.
         //
         // We do _not_ need to check the value of the borrow flag since we got `&mut`, so we know
         // it is guaranteed a mutable borrow.
@@ -211,48 +156,6 @@ pub trait Suspend {
         let data = (runner)();
         // unsafe: See above.
         borrow_mut(unsafe { &*last.0 });
-        data
-    }
-
-    /// Same as [suspend](Suspend::suspend) but takes an immutable reference instead.
-    fn suspend_ref<F: FnOnce() -> R, R>(&self, runner: F) -> R
-    where
-        Self: Sized,
-    {
-        let last = STACK.with(|x| {
-            // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
-            // for more than immediate mutation or acquiring information.
-            if let Some(last) = unsafe { &mut *x.get() }.last() {
-                *last
-            } else {
-                panic!("revent: suspend_ref: item not expected");
-            }
-        });
-
-        let item: *const _ = &*self;
-        let raw: *const _ = last.1;
-        if raw != item as *const () {
-            panic!("revent: suspend_ref: item not expected");
-        }
-
-        if last.2 != mem::size_of::<Self>() {
-            panic!("revent: suspend: item not expected",);
-        }
-
-        // We _must_ guarantee that this an immutable borrow (corresponding to an `emit_ref`). If
-        // it is not, then our borrow flag won't make sense anymore.
-        if is_borrowed_mut(unsafe { &*last.0 }) {
-            panic!("revent: suspend_ref: called on item that is mutably borrowed");
-        }
-
-        // unsafe: The pointer `last.0` to `*const Cell<bool>` is valid because it refers to a
-        // variable on the stack from at least 2 stack frames earlier. The pointer comes from
-        // `Node` which is contained by `Channel` or `Slot`, which guarantees that the pointee
-        // exists.
-        unborrow(unsafe { &*last.0 });
-        let data = (runner)();
-        // unsafe: See above.
-        borrow(unsafe { &*last.0 });
         data
     }
 }
@@ -264,18 +167,11 @@ impl<T> Suspend for T {}
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use std::cell::Cell;
 
     #[test]
-    #[should_panic(expected = "revent: suspend: item not expected")]
+    #[should_panic(expected = "revent: suspend: not inside node context")]
     fn suspending_on_empty_stack() {
         ().suspend(|| {});
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: suspend_ref: item not expected")]
-    fn suspending_ref_on_empty_stack() {
-        ().suspend_ref(|| {});
     }
 
     #[test]
@@ -288,73 +184,39 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent: suspend_ref: item not expected")]
-    fn suspending_ref_invalid_item() {
+    #[should_panic(expected = "revent: suspend: item not expected")]
+    fn suspend_not_top() {
         let x = Node::new(());
-        x.emit(|()| {
-            ().suspend_ref(|| {});
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: suspend_ref: called on item that is mutably borrowed")]
-    fn suspending_ref_of_emit() {
-        let x = Node::new(());
-        x.emit(|x| {
-            (&*x).suspend_ref(|| {});
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: emit_ref: accessing already mutably borrowed item")]
-    fn emit_ref_after_emit() {
-        let x = Node::new(());
-        x.emit(|()| {
-            x.emit_ref(|()| {});
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "revent: emit: accessing already borrowed item")]
-    fn emit_after_emit_ref() {
-        let x = Node::new(());
-        x.emit_ref(|()| {
-            x.emit(|()| {});
-        });
-    }
-
-    #[test]
-    fn ref_suspend_followed_by_suspend() {
-        let node = Node::new(());
-        node.emit_ref(|x| {
-            x.suspend_ref(|| {
-                node.emit(|x| {
-                    x.suspend(|| {});
-                });
+        let y = Node::new(());
+        x.emit(|x1| {
+            y.emit(|_| {
+                x1.suspend(|| {});
             });
         });
     }
 
     #[test]
+    fn suspend() {
+        let x = Node::new(());
+        x.emit(|y| {
+            y.suspend(|| {});
+        });
+    }
+
+    #[test]
     fn recursion() {
-        trait Trait1 {
-            fn channel_1_function(&mut self, hub: &Hub);
+        trait Trait {
+            fn function(&mut self, hub: &Channel<dyn Trait>);
         }
 
-        struct Hub {
-            channel1: Channel<dyn Trait1>,
-        }
-
-        let mut hub = Hub {
-            channel1: Channel::new(),
-        };
+        let mut channel = Channel::<dyn Trait>::new();
 
         struct My {
             value: usize,
         };
 
-        impl Trait1 for My {
-            fn channel_1_function(&mut self, hub: &Hub) {
+        impl Trait for My {
+            fn function(&mut self, channel: &Channel<dyn Trait>) {
                 if self.value == 0 {
                     return;
                 }
@@ -362,53 +224,16 @@ mod tests {
                 self.value -= 1;
 
                 self.suspend(|| {
-                    hub.channel1.emit(|item| {
-                        item.channel_1_function(hub);
-                    });
-                });
-            }
-        }
-
-        hub.channel1.insert(Node::new(My { value: 12 }));
-
-        hub.channel1.emit(|x| {
-            x.channel_1_function(&hub);
-        });
-    }
-
-    #[test]
-    fn recursion_ref() {
-        trait Trait {
-            fn function(&self, channel: &Channel<dyn Trait>);
-        }
-
-        let mut channel = Channel::<dyn Trait>::new();
-
-        struct My {
-            value: Cell<usize>,
-        };
-
-        impl Trait for My {
-            fn function(&self, channel: &Channel<dyn Trait>) {
-                if self.value.get() == 0 {
-                    return;
-                }
-
-                self.value.set(self.value.get() - 1);
-
-                self.suspend_ref(|| {
-                    channel.emit_ref(|item| {
+                    channel.emit(|item| {
                         item.function(channel);
                     });
                 });
             }
         }
 
-        channel.insert(Node::new(My {
-            value: Cell::new(12),
-        }));
+        channel.insert(0, Node::new(My { value: 12 }));
 
-        channel.emit_ref(|x| {
+        channel.emit(|x| {
             x.function(&channel);
         });
     }
@@ -429,17 +254,17 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "revent: suspend: item not expected")]
-    fn suspend_ref_overlapping_struct_check() {
-        struct Decoy {
-            a: (),
-            _b: u8,
-        }
-
-        let my_node = Node::new(Decoy { a: (), _b: 0 });
-
-        my_node.emit(|x| {
-            x.a.suspend_ref(|| {});
+    #[should_panic(expected = "revent: emit: accessing already borrowed item")]
+    fn node_inside_node() {
+        let node = Node::new(Node::new(123));
+        node.emit(|subnode| {
+            subnode.emit(|x| {
+                x.suspend(|| {
+                    node.emit(|subnode| {
+                        *subnode = Node::new(100);
+                    });
+                });
+            });
         });
     }
 }

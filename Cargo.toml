@@ -1,6 +1,6 @@
 [package]
 name = "revent"
-version = "0.27.0"
+version = "0.28.0"
 license = "LGPL-3.0"
 description = "Event system for Rust"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
@@ -8,20 +8,20 @@ edition = "2018"
 documentation = "https://docs.rs/revent"
 repository = "https://github.com/BourgondAries/revent.git"
 homepage = "https://github.com/BourgondAries/revent.git"
-
-[dependencies]
-slog = { version = "2.5.2", optional = true }
+keywords = ["event", "stacked", "borrow"]
 
 [dev-dependencies]
 criterion = "0.3.1"
 quickcheck = "0.9.2"
 quickcheck_macros = "0.9.1"
-slog-async = "2.5"
-slog-term = "2.5"
 
 [features]
-logging = ["slog"]
+trace = []
 
 [[bench]]
 name = "basic"
 harness = false
+
+[profile.bench]
+codegen-units = 1
+lto = true

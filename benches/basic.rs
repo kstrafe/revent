@@ -15,7 +15,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         let mut channel: Channel<dyn Trait> = Channel::new();
 
-        channel.insert(Node::new(()));
+        channel.insert(0, Node::new(()));
 
         b.iter(|| {
             channel.emit(|x| x.function());
@@ -68,7 +68,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         }
 
         let x = Node::new(Subscriber { value: 1000 });
-        hub.channel.insert(x.clone());
+        hub.channel.insert(0, x.clone());
         hub.reset.insert(x);
 
         b.iter(|| {
@@ -99,16 +99,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 x.suspend(|| {
                     black_box(&node);
                 });
-            });
-        });
-    });
-
-    c.bench_function("node ref access", |b| {
-        let node = Node::new(());
-
-        b.iter(|| {
-            node.emit_ref(|x| {
-                black_box(x);
             });
         });
     });

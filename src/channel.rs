@@ -1,5 +1,4 @@
-use crate::Node;
-use std::cmp::Ordering;
+use crate::{Node, Trace};
 
 /// Container for multiple [Node]s.
 ///
@@ -9,7 +8,7 @@ use std::cmp::Ordering;
 /// let mut channel = Channel::new();
 ///
 /// for number in 0..10 {
-///     channel.insert(Node::new(number));
+///     channel.insert(0, Node::new(number));
 /// }
 ///
 /// channel.emit(|x| {
@@ -18,6 +17,8 @@ use std::cmp::Ordering;
 /// ```
 pub struct Channel<T: ?Sized> {
     items: Vec<Node<T>>,
+    order: Vec<isize>,
+    trace: Trace,
 }
 
 impl<T: ?Sized> Default for Channel<T> {
@@ -29,17 +30,71 @@ impl<T: ?Sized> Default for Channel<T> {
 impl<T: ?Sized> Channel<T> {
     /// Create a new channel.
     pub fn new() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            order: Vec::new(),
+            trace: Trace::empty(),
+        }
+    }
+
+    /// Create a new channel with a trace object.
+    pub fn new_with_trace(trace: impl Fn(usize) + 'static) -> Self {
+        Self {
+            items: Vec::new(),
+            order: Vec::new(),
+            trace: Trace::new(trace),
+        }
     }
 
     /// Insert a node into this channel.
     ///
-    /// Appends the node to the end of the channel.
-    pub fn insert(&mut self, item: Node<T>) {
-        self.items.push(item);
+    /// The value `relative` indicates where the node will be put in the list relative to other
+    /// nodes. If two nodes have the same `relative` value, then the node will be prepended if it
+    /// is signed, and appended if unsigned.
+    pub fn insert(&mut self, relative: isize, item: Node<T>) {
+        match self.order.binary_search(&relative) {
+            Ok(exact) => {
+                if relative >= 0 {
+                    match self.order[exact..]
+                        .iter()
+                        .enumerate()
+                        .find(|(_, &x)| x != relative)
+                    {
+                        Some((idx, _)) => {
+                            self.items.insert(exact + idx, item);
+                            self.order.insert(exact + idx, relative);
+                        }
+                        None => {
+                            self.items.push(item);
+                            self.order.push(relative);
+                        }
+                    }
+                } else {
+                    match self.order[..exact]
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .find(|(_, &x)| x != relative)
+                    {
+                        Some((idx, _)) => {
+                            self.items.insert(exact - idx, item);
+                            self.order.insert(exact - idx, relative);
+                        }
+                        None => {
+                            self.items.insert(0, item);
+                            self.order.insert(0, relative);
+                        }
+                    }
+                }
+            }
+            Err(order) => {
+                self.items.insert(order, item);
+                self.order.insert(order, relative);
+            }
+        }
     }
 
-    /// Remove a node from this channel if it exists.
+    /// Remove all occurrences of a node from this channel.
     ///
     /// # Performance #
     ///
@@ -50,38 +105,16 @@ impl<T: ?Sized> Channel<T> {
 
     /// Apply a function to each item in this channel.
     pub fn emit(&self, mut handler: impl FnMut(&mut T)) {
+        self.trace.log();
+        Trace::indent();
+
         for item in self.items.iter() {
             item.emit(|x| {
                 (handler)(x);
             });
         }
-    }
 
-    /// Apply a function to each item in this channel.
-    ///
-    /// Immutable version of [emit](Channel::emit).
-    pub fn emit_ref(&self, mut handler: impl FnMut(&T)) {
-        for item in self.items.iter() {
-            item.emit_ref(|x| {
-                (handler)(x);
-            });
-        }
-    }
-
-    /// Sort the nodes in this channel.
-    pub fn sort_by<F>(&mut self, mut compare: F)
-    where
-        F: FnMut(&T, &T) -> Ordering,
-    {
-        self.items
-            .sort_by(|a, b| a.emit_ref(|a| b.emit_ref(|b| (compare)(a, b))));
-    }
-}
-
-impl<T: Ord + ?Sized> Channel<T> {
-    /// Sort the channel.
-    pub fn sort(&mut self) {
-        self.sort_by(|a, b| a.cmp(b));
+        Trace::dedent();
     }
 }
 
@@ -89,13 +122,107 @@ impl<T: Ord + ?Sized> Channel<T> {
 mod tests {
     use super::{Channel, Node};
 
-    #[test]
-    fn duplicate_node_sort() {
-        let node = Node::new(());
+    #[quickcheck_macros::quickcheck]
+    fn inserting_appends_or_prepends(relative: isize, nodes: usize) {
         let mut channel = Channel::new();
-        channel.insert(node.clone());
-        channel.insert(node);
 
-        channel.sort();
+        for node in 0..nodes {
+            channel.insert(relative, Node::new(node));
+        }
+
+        if relative >= 0 {
+            let mut value = 0;
+            channel.emit(|x| {
+                assert_eq!(value, *x);
+                value += 1;
+            });
+            assert_eq!(value, nodes);
+        } else {
+            let mut value = nodes;
+            channel.emit(|x| {
+                value -= 1;
+                assert_eq!(value, *x);
+            });
+            assert_eq!(value, 0);
+        }
+    }
+
+    #[test]
+    fn basic() {
+        let mut channel = Channel::new();
+
+        let node = Node::new(0);
+        channel.insert(0, node.clone());
+        channel.insert(1, Node::new(1));
+
+        let mut number = 0;
+        channel.emit(|x| {
+            assert_eq!(*x, number);
+            number += 1;
+        });
+        assert_eq!(number, 2);
+
+        channel.remove(&node);
+
+        let mut number = 1;
+        channel.emit(|x| {
+            assert_eq!(*x, number);
+            number += 1;
+        });
+        assert_eq!(number, 2);
+    }
+
+    #[test]
+    fn haystack() {
+        let mut channel = Channel::new();
+
+        let node = Node::new(0);
+        for _ in 0..10 {
+            channel.insert(0, node.clone());
+        }
+        for _ in 0..10 {
+            channel.insert(2, node.clone());
+        }
+
+        channel.insert(1, Node::new(1));
+
+        channel.remove(&node);
+
+        let mut count = 0;
+        channel.emit(|x| {
+            assert_eq!(*x, 1);
+            count += 1;
+        });
+        assert_eq!(count, 1);
+    }
+}
+
+#[cfg(all(test, feature = "trace"))]
+mod trace_tests {
+    use crate::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn tracing() {
+        let out = Rc::new(RefCell::new(None));
+
+        let capture = out.clone();
+        let mut channel = Channel::new_with_trace(move |indent| {
+            assert!(matches!(*capture.borrow(), None));
+            *capture.borrow_mut() = Some(indent);
+        });
+
+        let capture = out.clone();
+        channel.insert(
+            0,
+            Node::new_with_trace((), move |indent| {
+                assert!(matches!(*capture.borrow(), Some(0)));
+                *capture.borrow_mut() = Some(indent);
+            }),
+        );
+
+        channel.emit(|_| {});
+
+        assert!(matches!(*out.borrow(), Some(1)));
     }
 }
