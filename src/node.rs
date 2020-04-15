@@ -4,6 +4,7 @@ use crate::{
 use std::{
     cell::{Cell, UnsafeCell},
     marker::Unsize,
+    mem,
     ops::CoerceUnsized,
     rc::Rc,
 };
@@ -18,6 +19,7 @@ use std::{
 /// node to be reborrowed without aliasing.
 pub struct Node<T: ?Sized> {
     item: Rc<(Cell<BorrowFlag>, UnsafeCell<T>)>,
+    size: usize,
 }
 
 impl<T, U> CoerceUnsized<Node<U>> for Node<T>
@@ -31,6 +33,7 @@ impl<T> Clone for Node<T> {
     fn clone(&self) -> Self {
         Self {
             item: self.item.clone(),
+            size: self.size,
         }
     }
 }
@@ -40,6 +43,7 @@ impl<T> Node<T> {
     pub fn new(item: T) -> Self {
         Self {
             item: Rc::new((Cell::new(0), UnsafeCell::new(item))),
+            size: mem::size_of::<T>(),
         }
     }
 }
@@ -90,7 +94,7 @@ impl<T: ?Sized> Node<T> {
         STACK.with(|x| {
             // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
             // for more than immediate mutation or acquiring information.
-            unsafe { &mut *x.get() }.push((self.flag(), self.data().get() as *mut _));
+            unsafe { &mut *x.get() }.push((self.flag(), self.data().get() as *mut _, self.size));
         });
 
         // unsafe: `item` is an `Rc`, which guarantees the existence and validity of the
@@ -121,7 +125,7 @@ impl<T: ?Sized> Node<T> {
         STACK.with(|x| {
             // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
             // for more than immediate mutation or acquiring information.
-            unsafe { &mut *x.get() }.push((self.flag(), self.data().get() as *mut _));
+            unsafe { &mut *x.get() }.push((self.flag(), self.data().get() as *mut _, self.size));
         });
 
         // unsafe: `item` is an `Rc`, which guarantees the existence and validity of the

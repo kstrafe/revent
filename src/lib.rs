@@ -100,7 +100,10 @@
 #![feature(coerce_unsized, unsize)]
 
 pub use self::{channel::Channel, node::Node, slot::Slot};
-use std::cell::{Cell, UnsafeCell};
+use std::{
+    cell::{Cell, UnsafeCell},
+    mem,
+};
 
 mod channel;
 mod node;
@@ -146,7 +149,7 @@ thread_local! {
     // `STACK` is parallel to the callstack. The last element represents the current active item
     // being invoked on a `Channel` or `Slot`. It is inside an `UnsafeCell` because it is only ever
     // pushed/popped in the same function, and we can prove that borrows are not propagated.
-    static STACK: UnsafeCell<Vec<(*const Cell<BorrowFlag>, *mut ())>> = UnsafeCell::new(Vec::new());
+    static STACK: UnsafeCell<Vec<(*const Cell<BorrowFlag>, *mut (), usize)>> = UnsafeCell::new(Vec::new());
 }
 
 // ---
@@ -174,7 +177,10 @@ pub trait Suspend {
     ///     });
     /// });
     /// ```
-    fn suspend<F: FnOnce() -> R, R>(&mut self, runner: F) -> R {
+    fn suspend<F: FnOnce() -> R, R>(&mut self, runner: F) -> R
+    where
+        Self: Sized,
+    {
         let last = STACK.with(|x| {
             // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
             // for more than immediate mutation or acquiring information.
@@ -187,6 +193,10 @@ pub trait Suspend {
 
         let item: *mut _ = self;
         if last.1 != item as *mut () {
+            panic!("revent: suspend: item not expected",);
+        }
+
+        if last.2 != mem::size_of::<Self>() {
             panic!("revent: suspend: item not expected",);
         }
 
@@ -205,7 +215,10 @@ pub trait Suspend {
     }
 
     /// Same as [suspend](Suspend::suspend) but takes an immutable reference instead.
-    fn suspend_ref<F: FnOnce() -> R, R>(&self, runner: F) -> R {
+    fn suspend_ref<F: FnOnce() -> R, R>(&self, runner: F) -> R
+    where
+        Self: Sized,
+    {
         let last = STACK.with(|x| {
             // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
             // for more than immediate mutation or acquiring information.
@@ -220,6 +233,10 @@ pub trait Suspend {
         let raw: *const _ = last.1;
         if raw != item as *const () {
             panic!("revent: suspend_ref: item not expected");
+        }
+
+        if last.2 != mem::size_of::<Self>() {
+            panic!("revent: suspend: item not expected",);
         }
 
         // We _must_ guarantee that this an immutable borrow (corresponding to an `emit_ref`). If
@@ -393,6 +410,36 @@ mod tests {
 
         channel.emit_ref(|x| {
             x.function(&channel);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: suspend: item not expected")]
+    fn suspend_overlapping_struct_check() {
+        struct Decoy {
+            a: (),
+            _b: u8,
+        }
+
+        let my_node = Node::new(Decoy { a: (), _b: 0 });
+
+        my_node.emit(|x| {
+            x.a.suspend(|| {});
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "revent: suspend: item not expected")]
+    fn suspend_ref_overlapping_struct_check() {
+        struct Decoy {
+            a: (),
+            _b: u8,
+        }
+
+        let my_node = Node::new(Decoy { a: (), _b: 0 });
+
+        my_node.emit(|x| {
+            x.a.suspend_ref(|| {});
         });
     }
 }
