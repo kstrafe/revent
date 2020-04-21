@@ -1,6 +1,6 @@
 [package]
 name = "revent"
-version = "0.28.0"
+version = "0.28.1"
 license = "LGPL-3.0"
 description = "Event system for Rust"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
@@ -9,6 +9,9 @@ documentation = "https://docs.rs/revent"
 repository = "https://github.com/BourgondAries/revent.git"
 homepage = "https://github.com/BourgondAries/revent.git"
 keywords = ["event", "stacked", "borrow"]
+
+[dependencies]
+isize-vec = "0.1.1"
 
 [dev-dependencies]
 criterion = "0.3.1"

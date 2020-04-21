@@ -1,4 +1,5 @@
 use crate::{Node, Trace};
+use isize_vec::IsizeVec;
 
 /// Container for multiple [Node]s.
 ///
@@ -16,8 +17,7 @@ use crate::{Node, Trace};
 /// });
 /// ```
 pub struct Channel<T: ?Sized> {
-    items: Vec<Node<T>>,
-    order: Vec<isize>,
+    items: IsizeVec<Node<T>>,
     trace: Trace,
 }
 
@@ -31,8 +31,7 @@ impl<T: ?Sized> Channel<T> {
     /// Create a new channel.
     pub fn new() -> Self {
         Self {
-            items: Vec::new(),
-            order: Vec::new(),
+            items: IsizeVec::default(),
             trace: Trace::empty(),
         }
     }
@@ -40,8 +39,7 @@ impl<T: ?Sized> Channel<T> {
     /// Create a new channel with a trace object.
     pub fn new_with_trace(trace: impl Fn(usize) + 'static) -> Self {
         Self {
-            items: Vec::new(),
-            order: Vec::new(),
+            items: IsizeVec::default(),
             trace: Trace::new(trace),
         }
     }
@@ -52,46 +50,7 @@ impl<T: ?Sized> Channel<T> {
     /// nodes. If two nodes have the same `relative` value, then the node will be prepended if it
     /// is signed, and appended if unsigned.
     pub fn insert(&mut self, relative: isize, item: Node<T>) {
-        match self.order.binary_search(&relative) {
-            Ok(exact) => {
-                if relative >= 0 {
-                    match self.order[exact..]
-                        .iter()
-                        .enumerate()
-                        .find(|(_, &x)| x != relative)
-                    {
-                        Some((idx, _)) => {
-                            self.items.insert(exact + idx, item);
-                            self.order.insert(exact + idx, relative);
-                        }
-                        None => {
-                            self.items.push(item);
-                            self.order.push(relative);
-                        }
-                    }
-                } else {
-                    match self.order[..exact]
-                        .iter()
-                        .rev()
-                        .enumerate()
-                        .find(|(_, &x)| x != relative)
-                    {
-                        Some((idx, _)) => {
-                            self.items.insert(exact - idx, item);
-                            self.order.insert(exact - idx, relative);
-                        }
-                        None => {
-                            self.items.insert(0, item);
-                            self.order.insert(0, relative);
-                        }
-                    }
-                }
-            }
-            Err(order) => {
-                self.items.insert(order, item);
-                self.order.insert(order, relative);
-            }
-        }
+        self.items.insert(relative, item);
     }
 
     /// Remove all occurrences of a node from this channel.
@@ -121,6 +80,16 @@ impl<T: ?Sized> Channel<T> {
 #[cfg(test)]
 mod tests {
     use super::{Channel, Node};
+
+    #[test]
+    fn removing_considers_order() {
+        let mut channel = Channel::new();
+        let node = Node::new(());
+        channel.insert(0, node.clone());
+        channel.remove(&node);
+
+        channel.insert(1, Node::new(()));
+    }
 
     #[quickcheck_macros::quickcheck]
     fn inserting_appends_or_prepends(relative: isize, nodes: usize) {
