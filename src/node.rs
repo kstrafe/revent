@@ -19,6 +19,7 @@ pub struct Node<T: ?Sized> {
     item: Rc<(Cell<BorrowFlag>, UnsafeCell<T>)>,
     size: usize,
     trace: Trace,
+    stack: *mut Vec<(*const Cell<BorrowFlag>, *mut (), usize)>,
 }
 
 impl<T, U> CoerceUnsized<Node<U>> for Node<T>
@@ -34,6 +35,7 @@ impl<T> Clone for Node<T> {
             item: self.item.clone(),
             size: self.size,
             trace: self.trace.clone(),
+            stack: STACK.with(|x| x.get()),
         }
     }
 }
@@ -45,6 +47,7 @@ impl<T> Node<T> {
             item: Rc::new((Cell::new(0), UnsafeCell::new(item))),
             size: mem::size_of::<T>(),
             trace: Trace::empty(),
+            stack: STACK.with(|x| x.get()),
         }
     }
 
@@ -59,6 +62,7 @@ impl<T> Node<T> {
             item: Rc::new((Cell::new(0), UnsafeCell::new(item))),
             size: mem::size_of::<T>(),
             trace: Trace::new(trace),
+            stack: STACK.with(|x| x.get()),
         }
     }
 }
@@ -109,11 +113,7 @@ impl<T: ?Sized> Node<T> {
         }
         borrow_mut(self.flag());
 
-        STACK.with(|x| {
-            // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
-            // for more than immediate mutation or acquiring information.
-            unsafe { &mut *x.get() }.push((self.flag(), self.data().get() as *mut _, self.size));
-        });
+        unsafe { &mut *self.stack }.push((self.flag(), self.data().get() as *mut _, self.size));
 
         // unsafe: `item` is an `Rc`, which guarantees the existence and validity of the
         // pointee. It is also safeguarded by `self.used`, which we have proven above to be
@@ -121,25 +121,23 @@ impl<T: ?Sized> Node<T> {
         let object = unsafe { &mut *self.data().get() };
         let data = (handler)(object);
 
-        STACK.with(|x| {
-            // unsafe: We know there exist no other borrows of `STACK`. It is _never_ borrowed
-            // for more than immediate mutation or acquiring information.
-            let top = unsafe { &mut *x.get() }.pop();
-            debug_assert!(top.is_some());
-        });
+        let top = unsafe { &mut *self.stack }.pop();
         unborrow_mut(self.flag());
         data
     }
 
     /// Returns true if two `Node`s point to the same allocation.
+    #[inline]
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
         Rc::ptr_eq(&this.item, &other.item)
     }
 
+    #[inline]
     fn data(&self) -> &UnsafeCell<T> {
         &self.item.1
     }
 
+    #[inline]
     fn flag(&self) -> &Cell<BorrowFlag> {
         &self.item.0
     }
