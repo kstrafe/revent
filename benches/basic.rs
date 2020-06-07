@@ -1,7 +1,42 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+#[cfg(feature = "asynchronous")]
+use revent::asynchronous::Mailer;
 use revent::{Channel, Node, Slot, Suspend};
 
 fn criterion_benchmark(c: &mut Criterion) {
+    #[cfg(feature = "asynchronous")]
+    c.bench_function("mailer blocking", |b| {
+        let mailer = Mailer::unbounded();
+        let mailbox = mailer.mailbox();
+
+        b.iter(|| {
+            mailer.send(());
+            black_box(mailbox.recv());
+        });
+    });
+
+    #[cfg(feature = "asynchronous")]
+    c.bench_function("mailer empty", |b| {
+        let mut channel = Mailer::unbounded();
+
+        b.iter(|| {
+            channel.send(());
+            black_box(&mut channel);
+        });
+    });
+
+    #[cfg(feature = "asynchronous")]
+    c.bench_function("mailer one", |b| {
+        let mut channel = Mailer::unbounded();
+
+        let _mailbox = channel.mailbox();
+
+        b.iter(|| {
+            channel.send(());
+            black_box(&mut channel);
+        });
+    });
+
     c.bench_function("emit", |b| {
         trait Trait {
             fn function(&mut self);

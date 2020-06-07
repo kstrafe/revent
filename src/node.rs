@@ -121,7 +121,7 @@ impl<T: ?Sized> Node<T> {
         let object = unsafe { &mut *self.data().get() };
         let data = (handler)(object);
 
-        let top = unsafe { &mut *self.stack }.pop();
+        unsafe { &mut *self.stack }.pop();
         unborrow_mut(self.flag());
         data
     }

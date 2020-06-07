@@ -60,7 +60,7 @@
     unused_import_braces,
     unused_qualifications
 )]
-#![feature(coerce_unsized, unsize)]
+#![feature(coerce_unsized, drain_filter, unsize)]
 
 use self::trace::Trace;
 pub use self::{channel::Channel, node::Node, slot::Slot};
@@ -69,6 +69,8 @@ use std::{
     mem,
 };
 
+#[cfg(feature = "asynchronous")]
+pub mod asynchronous;
 mod channel;
 mod node;
 mod slot;
